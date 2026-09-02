@@ -47,6 +47,7 @@ _DATE_COL: dict[str, str] = {
     "Daily option prices (2019 probe)": "date",
     "Zero-coupon curve": "date",
     "Projected dividends (discrete)": "ex_date",
+    "Projected dividends (point-in-time projection)": "date",
     "OM historical volatility": "date",
 }
 
@@ -141,13 +142,30 @@ def probe_link_scores(link_table: str, cfg: Config | None = None, conn=None) -> 
     )
 
 
+# What the probe would like to see on the option price file. Anything absent is reported
+# rather than fatal -- discovering that a column does not exist is the *point* of Stage 0,
+# so the probe must survive it. `exercise_style` is the known example: IvyDB's price file
+# carries `am_settlement` and `expiry_indicator` instead, and never an exercise-style flag.
+_PROBE_OPTION_COLUMNS = [
+    "secid", "date", "exdate", "optionid", "cp_flag", "best_bid", "best_offer",
+    "impl_volatility", "delta", "vega", "gamma", "open_interest", "volume",
+    "ss_flag", "contract_size", "cfadj", "am_settlement", "expiry_indicator",
+    "forward_price", "exercise_style",
+]
+
+
 def probe_aapl_options(
     opprcd_table: str,
     link_table: str | None,
     cfg: Config | None = None,
     conn=None,
 ) -> dict[str, Any]:
-    """Checkpoint 0's live sanity query: AAPL options on the probe date must return rows."""
+    """Checkpoint 0's live sanity query: AAPL options on the probe date must return rows.
+
+    Also records the facts the Stage 2b selection SQL depends on and that differ by IvyDB
+    vintage: `ss_flag`'s storage type (quoted `'0'` vs bare `0`), `contract_size`'s type,
+    and which of the settlement/exercise columns actually exist.
+    """
     cfg = cfg or load_config()
     conn = conn or get_connection(cfg)
     probe_date = str(cfg["sanity"]["probe_date"])
@@ -173,27 +191,40 @@ def probe_aapl_options(
         return out
 
     schema, table = split_table(opprcd_table)
+    desc = describe_table(opprcd_table, conn=conn)
+    name_col = "name" if "name" in desc.columns else desc.columns[0]
+    available = {str(c).lower() for c in desc[name_col]}
+    selected = [c for c in _PROBE_OPTION_COLUMNS if c in available]
+    out["absent_columns"] = [c for c in _PROBE_OPTION_COLUMNS if c not in available]
+
+    # strike_price is stored x1000 by OptionMetrics; dividing here is also a units check.
+    cols = ", ".join(selected) + (", strike_price/1000.0 AS strike" if "strike_price" in available else "")
     df = conn.raw_sql(
-        f"SELECT secid, date, exdate, optionid, cp_flag, strike_price/1000.0 AS strike, "
-        f"best_bid, best_offer, impl_volatility, delta, open_interest, volume, "
-        f"ss_flag, contract_size, exercise_style "
-        f"FROM {schema}.{table} WHERE secid = %(secid)s AND date = %(d)s",
+        f"SELECT {cols} FROM {schema}.{table} WHERE secid = %(secid)s AND date = %(d)s",
         params={"secid": secid, "d": probe_date},
     )
     out["option_rows"] = int(len(df))
-    if len(df):
+    if not len(df):
+        return out
+
+    if "strike" in df.columns:
         out["strike_range"] = [float(df["strike"].min()), float(df["strike"].max())]
-        out["n_expiries"] = int(df["exdate"].nunique())
-        out["exercise_style"] = sorted(map(str, df["exercise_style"].dropna().unique()))
-        out["ss_flag_dtype"] = str(df["ss_flag"].dtype)
-        out["ss_flag_values"] = sorted(map(str, df["ss_flag"].dropna().unique()))[:5]
-        out["contract_size_values"] = sorted(map(float, df["contract_size"].dropna().unique()))[:5]
-        near = df.loc[(df["delta"].abs() - 0.5).abs().idxmin()] if df["delta"].notna().any() else None
-        if near is not None:
-            out["nearest_atm"] = {
-                k: (float(near[k]) if k not in ("cp_flag",) else str(near[k]))
-                for k in ("cp_flag", "strike", "delta", "best_bid", "best_offer", "impl_volatility")
-            }
+    out["n_expiries"] = int(df["exdate"].nunique())
+
+    # Storage types the Stage 2b selection SQL compares literals against.
+    for col in ("ss_flag", "contract_size", "am_settlement", "expiry_indicator", "exercise_style"):
+        if col in df.columns:
+            vals = df[col].dropna().unique()
+            out[f"{col}_dtype"] = str(df[col].dtype)
+            out[f"{col}_values"] = sorted(map(str, vals))[:6]
+
+    if df["delta"].notna().any():
+        near = df.loc[(df["delta"].abs() - 0.5).abs().idxmin()]
+        out["nearest_atm"] = {
+            k: (str(near[k]) if k == "cp_flag" else float(near[k]))
+            for k in ("cp_flag", "strike", "delta", "best_bid", "best_offer", "impl_volatility")
+            if k in df.columns and pd.notna(near[k])
+        }
     return out
 
 

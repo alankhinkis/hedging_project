@@ -100,9 +100,12 @@ schema_targets:
   - need: "Daily option prices (2019 probe)"
     table: "optionm.opprcd2019"
     confidence: high
+    # NB: IvyDB's price file has no `exercise_style` column (verified 2026-09-02); it carries
+    # `am_settlement` and `expiry_indicator` instead. US single-name equity options are
+    # American regardless, so nothing downstream needs an exercise-style flag.
     key_columns: [secid, date, exdate, optionid, cp_flag, strike_price, best_bid, best_offer,
-                  impl_volatility, delta, vega, gamma, cfadj, ss_flag, contract_size, exercise_style,
-                  volume, open_interest]
+                  impl_volatility, delta, vega, gamma, cfadj, ss_flag, contract_size,
+                  am_settlement, volume, open_interest]
   - need: "OptionMetrics security master"
     table: "optionm.securd"
     confidence: medium
@@ -115,6 +118,15 @@ schema_targets:
     table: "optionm.distrd"
     confidence: medium
     key_columns: [secid, ex_date, amount, distr_type]
+  # `distrd` holds *announced* distributions; `distrprojd{YYYY}` holds the dividend schedule
+  # as PROJECTED on each date (secid, date, exdate, amount). The projection file is the
+  # look-ahead-free input for the escrowed-dividend adjustment (M9/Q5) -- on 2019-01-02 it
+  # says what the market then expected, not what was later declared. Note the column is
+  # `exdate`, not `ex_date` as in `distrd`.
+  - need: "Projected dividends (point-in-time projection)"
+    table: "optionm.distrprojd2019"
+    confidence: high
+    key_columns: [secid, date, exdate, amount]
   - need: "OM historical volatility"
     table: "optionm.hvold"
     confidence: low

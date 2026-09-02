@@ -110,6 +110,62 @@ lists every query that ever produced a number in the output.
 Credentials: `WRDS_USERNAME` from `.env`; the password lives only in `~/.pgpass` and is never read,
 logged, or committed by this code.
 
+### What Stage 0 actually found (run 2026-09-02, all 12 targets resolved)
+
+Five of these change what later stages must do. They are the reason this stage exists.
+
+**1. `exercise_style` does not exist on the option price file.** `optionm.opprcd2019` carries
+`am_settlement` (0/1) and `expiry_indicator` instead. Nothing downstream needs an exercise-style
+flag — US single-name equity options are American regardless, and Q2 already fixed the hedging
+delta as BS-European with an escrowed-dividend adjustment. The plan's Pass A query
+(`PHASE1_PLAN.md:370`) selects this column and would have failed on first run.
+
+**2. `ss_flag` is `VARCHAR(1)` with observed value `'0'`; `contract_size` is `DOUBLE`.** The plan
+flagged this as vintage-dependent and needing verification. Verified: the selection SQL wants
+`ss_flag = '0'` **quoted** and `contract_size = 100` **unquoted**.
+
+**3. `expiry_indicator` marks weeklies.** Value `'w'` on the AAPL probe; NULL on standard
+monthlies. The plan does not mention this column, but with a 20–40 day window and monthly entry
+dates, weeklies will be in the candidate set. Whether to keep them is a Stage 2b decision — they
+are genuine, liquid contracts on large caps, but they change the expiry-cycle composition of the
+sample. Flagged, not yet decided.
+
+**4. The OM↔CRSP link's `score` semantics.** Distribution across `wrdsapps.opcrsphist`:
+
+| score | rows | distinct permno | reading |
+|---:|---:|---:|---|
+| 1 | 28,336 | 27,997 | best match |
+| 2 | 190 | 181 | |
+| 3 | 8 | 8 | |
+| 4 | 660 | 404 | |
+| 5 | 5,687 | 3,382 | |
+| 6 | 86,892 | **0** | **no CRSP match at all — permno is null** |
+
+Score 6 is not a weak link, it is the absence of one, and it is by far the largest bucket. The
+Stage 2a filter must therefore be `score <= 5 AND permno IS NOT NULL`; score 1 alone covers 99.3%
+of matched rows. Selecting on `score` without excluding 6 would look like a working join and
+silently produce nothing.
+
+**5. Q5 is resolved, and the answer is better than the plan expected.** There is no continuous
+dividend yield for equities (`idxdvd` is the index file, as predicted). But there are *two*
+discrete dividend sources, not one:
+
+* `optionm.distrd` — `(secid, ex_date, amount, distr_type, cancel_flag, approx_flag, ...)`:
+  **announced** distributions. AAPL 2019 shows four quarterly ordinary dividends (`distr_type='1'`).
+* `optionm.distrprojd{YYYY}` — `(secid, date, exdate, amount)`: the dividend schedule **as
+  projected on each `date`**. Year-split, like the price files.
+
+The projection file is the right input for the escrowed-dividend adjustment (M9), because it says
+what was expected on the entry date rather than what was later declared. For 30-day holds on large
+caps the two will rarely differ — dividends are announced well in advance — but the projection file
+removes the look-ahead by construction rather than by argument, at no extra cost. **Decision: use
+`distrprojd{YYYY}`, and use `distrd` as a cross-check on the realised amounts.** Note the column
+is `exdate` there and `ex_date` in `distrd`.
+
+Two smaller items: `optionm.hvold` is year-split as `optionm.hvold2019` etc. (the plan rated this
+guess "low confidence" and was right to), and the AAPL probe returned 1,590 rows across 14
+expiries with strikes 2.5–425, confirming permno 14593 → secid 101594 end to end.
+
 ---
 
 ## Stage 1 — Point-in-time universe
@@ -187,6 +243,32 @@ Encoded in `vrp.data.universe.checkpoint_1`:
 `output/tables/universe_turnover.csv` reports entries and exits per month, and
 `universe_member_counts.csv` the raw member count, so (1) and (6) are inspectable rather than
 merely asserted.
+
+### What Stage 1 actually produced (run 2026-09-02, all 7 checks pass)
+
+697 membership spans covering 693 distinct permnos over 2016–2023; 58,724 month-end market caps.
+The universe is 14,400 (month, permno) rows across 96 entry months, of which **84 entry months ×
+150 names = 12,600 fall inside the 2017–2023 sample**. The extra months at each end are the
+burn-in: the ranking runs from December 2016 (which governs the January 2017 entries) through
+December 2023 (which governs January 2024, unused). Stage 2b filters to the 84.
+
+Turnover is 2–5 names per month, and **241 distinct permnos appear in the in-sample top-150**
+(252 including burn-in). The plan expected 250–320; we are at the low end of that, which is what a
+top-*150* cut should give — the plan's range was calibrated on the full index, and the largest 150
+names turn over more slowly than the tail.
+
+The checks that carry real information:
+
+* **Member count 502–505 in every month.** Inside the expected 495–510, and the tightness is
+  itself reassuring — a join that drifted would not hold a 4-name range across 96 months.
+* **The deletion check auto-selected RAI (Reynolds American)**, whose membership span ends
+  2017-07-24 — acquired by BAT that month. Zero universe rows after. This is the check picking a
+  real corporate event out of the data with nothing hard-coded.
+* **The ranking is visibly time-varying.** January 2017's top 8 is AAPL, MSFT, **XOM**, AMZN, JNJ,
+  JPM, **GE**, WFC; December 2023's is AAPL, MSFT, AMZN, **NVDA**, GOOGL, GOOG, **TSLA**, META.
+  XOM at #3 and GE at #7 in 2017 are exactly the names a static present-day universe would omit.
+* **GOOG and GOOGL both sit in the March 2020 top 10**, confirming live the multi-class decision
+  above: the cut is per permno, and a dual-class issuer legitimately occupies two slots.
 
 ### One extra table the plan did not list
 

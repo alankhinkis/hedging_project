@@ -1,0 +1,32 @@
+{
+  "verified_on": "2026-09-02",
+  "tables": {
+    "S&P 500 point-in-time membership": "crsp.dsp500list",
+    "Monthly market cap": "crsp.msf",
+    "Daily stock prices": "crsp.dsf",
+    "CRSP name history": "crsp.dsenames",
+    "Delisting returns": "crsp.dsedelist",
+    "Daily option prices (2019 probe)": "optionm.opprcd2019",
+    "OptionMetrics security master": "optionm.securd",
+    "Zero-coupon curve": "optionm.zerocd",
+    "Projected dividends (discrete)": "optionm.distrd",
+    "Projected dividends (point-in-time projection)": "optionm.distrprojd2019",
+    "OM historical volatility": "optionm.hvold2019",
+    "OM <-> CRSP link": "wrdsapps.opcrsphist"
+  },
+  "guesses": {
+    "S&P 500 point-in-time membership": "crsp.dsp500list",
+    "Monthly market cap": "crsp.msf",
+    "Daily stock prices": "crsp.dsf",
+    "CRSP name history": "crsp.dsenames",
+    "Delisting returns": "crsp.dsedelist",
+    "Daily option prices (2019 probe)": "optionm.opprcd2019",
+    "OptionMetrics security master": "optionm.securd",
+    "Zero-coupon curve": "optionm.zerocd",
+    "Projected dividends (discrete)": "optionm.distrd",
+    "Projected dividends (point-in-time projection)": "optionm.distrprojd2019",
+    "OM historical volatility": "optionm.hvold",
+    "OM <-> CRSP link": "wrdsapps.opcrsphist"
+  },
+  "missing_key_columns": {}
+}

@@ -23,9 +23,9 @@ significantly negative mean gain implies a negative volatility risk premium.
 
 | Stage | What it does | State |
 |---|---|---|
-| 0 — environment + schema recon | verify every WRDS table name and column | **code complete; awaiting WRDS credentials** |
-| 1 — point-in-time universe | top-150 S&P 500 by month-end market cap | **code complete; awaiting WRDS credentials** |
-| 2a — CRSP prices + OM↔CRSP link | | not started |
+| 0 — environment + schema recon | verify every WRDS table name and column | ✅ **complete** — 12/12 tables verified, Checkpoint 0 passes |
+| 1 — point-in-time universe | top-150 S&P 500 by month-end market cap | ✅ **complete** — 84 months × 150 names, Checkpoint 1 passes |
+| 2a — CRSP prices + OM↔CRSP link | | next |
 | 2b — option chains | | not started |
 | 3 — physical volatility (VOL^h, VOL^g) | | not started |
 | 4 — the delta-hedging engine | | not started |
@@ -34,6 +34,12 @@ significantly negative mean gain implies a negative volatility risk premium.
 
 Stage 1's pure-pandas logic (the point-in-time join, the ranking) is fully unit-tested and passes
 without a WRDS connection: `python -m pytest tests`.
+
+Stage 1 output, as built: 241 distinct permnos across the 84 in-sample months, 2–5 names turning
+over per month. January 2017's top names include XOM (#3) and GE (#7); December 2023's include
+NVDA (#4) and TSLA (#7) — the ranking is genuinely point-in-time, not today's index projected
+backwards. See `docs/methodology.md` for the full checkpoint evidence and the five Stage 0 schema
+findings that change later stages.
 
 ---
 
