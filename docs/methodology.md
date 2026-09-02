@@ -278,6 +278,100 @@ readable by a human rather than being lists of permnos.
 
 ---
 
+## Stage 2a — CRSP prices and the OM↔CRSP link
+
+479,878 daily rows for 252 permnos, 2016-01-04 to 2024-02-29. All six Checkpoint 2a
+conditions pass.
+
+### The three CRSP conventions, handled rather than assumed
+
+**Negative prices are quote averages, not errors.** CRSP writes `prc < 0` when there was no
+closing trade and the field holds the bid-ask midpoint. We take the magnitude and set
+`price_is_quote_avg`. Dropping those rows would delete precisely the illiquid days a hedging
+study should care about; taking the raw negative would flip the sign of the position. In this
+panel it happens **once** in 479,878 rows, and two further rows have no price at all — so the
+convention is nearly irrelevant here, which is worth knowing rather than guessing.
+
+**`cfacpr == 0` is nulled, not divided by.** CRSP writes it in rare degenerate cases and it
+would otherwise produce infinities. None occur in this panel.
+
+**Splits are normalised to the entry-date factor (Q11).** `normalize_to_entry_factor` expresses
+every price in a position's life in the share units that prevailed on its entry date, so
+entry-date S and K are as-traded whichever side of a split the position opens on. The unit
+tests build AAPL's 2020-08-31 4-for-1 as a fixture and check both directions, including an
+explicit test that the *unfixed* version produces the fake −74% overnight move — the failure
+mode is pinned, not just the fix.
+
+Live confirmation, from `output/figures/split_adjustment.png` and the checkpoint:
+
+| | raw before → after | raw log change | adjusted log change |
+|---|---|---:|---:|
+| AAPL 4-for-1, 2020-08-31 | 499.23 → 129.04 | −1.353 | **+0.033** |
+| NVDA 4-for-1, 2021-07-20 | 751.19 → 186.12 | −1.395 | **−0.009** |
+
+The adjusted moves are the real returns for those days; the raw ones are the split.
+
+### A sharper reconciliation than the plan specified
+
+The plan proposes comparing cumulated `ret` against the adjusted price return and expecting
+them to differ "by the dividend contribution (~1%/yr)" — a soft check with a fuzzy tolerance.
+`crsp.dsf` also carries **`retx`**, the return *excluding* dividends, which should reproduce
+the adjusted price return essentially exactly. So the check became a two-part one:
+
+* `retx` vs adjusted price return — AAPL 2019: 1.85950 vs 1.85951, **relative error 3.4e-06**.
+  A tolerance of 1e-3 now means something.
+* `ret` vs `retx` — implied dividend yield **1.51%**, a plausible figure for AAPL in 2019, which
+  independently confirms the two return fields are what we think they are.
+
+### The link tie-break is decided by option activity, not by span
+
+This is the one Checkpoint 2a condition that failed on the first run, and the failure was real.
+
+Coverage is **100%** of the 14,400 universe (permno, month) cells — no name is unlinked. But 14
+permnos carry more than one secid concurrently, producing 19,093 ambiguous (permno, date) cells.
+The plan permits "zero conflicts *or* a documented tie-break rule", so a rule was needed.
+
+The obvious rule — lowest `score`, then the longer span — is **wrong**. Counting actual option
+rows for all 29 candidate secids shows that in every one of the 14 cases exactly one secid has
+any option data at all and the rest are empty. For 13 names the score-1 secid is the live one.
+For **USB (permno 66157) both secids score 1**:
+
+| secid | span | option rows, 2019 |
+|---|---|---:|
+| 111306 | 1996-01-01 → 2025-12-31 | **0** |
+| 104866 | 2001-02-27 → 2025-12-31 | 161,208 |
+
+A span-based tie-break picks 111306 — the dormant one — and USB silently contributes no
+tradable contracts for the entire sample. Nothing in the link table distinguishes them.
+
+**Rule adopted: lowest `score`, then most option activity, then longer span, then lower secid.**
+Activity is counted only for the ~29 candidate secids on ambiguous permnos, so it costs one
+small query. The checkpoint condition was rewritten to match: rather than demanding zero
+conflicts (which would fail forever on a legitimate data feature), it asserts that **every
+ambiguous link resolves to a secid that actually has option data**. That is the property that
+matters. The USB configuration is pinned as a unit test, including an assertion that the
+span-based rule picks the wrong secid, so the reasoning cannot be lost.
+
+Note the limit of this check: it verifies the *ambiguous* names resolve to live chains. A name
+with a single secid that happens to be dormant would not be caught here — that is Stage 2b's
+coverage report (Q9), where missing chains become a first-class result rather than a silent gap.
+
+### Delistings
+
+25 delisting events fall in the window, all on universe names. Per Q7, a position whose
+underlying delists before its expiry is excluded and counted — the option is early-terminated or
+converted and CRSP prices stop, so there is no honest way to carry the hedge to expiry. 25 events
+against ~12,600 stock-months is immaterial, but it is now a number rather than an assumption.
+
+### Entry calendar
+
+The first trading day of each month is derived from the CRSP calendar rather than assumed
+(Q10): 98 dates from 2016-01-04 to 2024-02-01, of which the 84 in 2017-01…2023-12 are the entry
+dates Stage 2b will use. This is what makes Stage 2b's option pull cheap — 12 dates a year
+instead of 250.
+
+---
+
 ## Decisions already fixed (from the planning session, 2026-09-01)
 
 Recorded here so they are visibly pre-committed, before any results exist.

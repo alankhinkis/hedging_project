@@ -29,7 +29,7 @@ import pandas as pd
 
 from ..config import Config, load_config
 from ..schema import table_for
-from ..wrds_conn import cached_query, get_connection, split_table
+from ..wrds_conn import cached_query, get_connection, resolve_columns, split_table
 
 log = logging.getLogger(__name__)
 
@@ -56,22 +56,8 @@ _NAMES_COLS = {
 
 
 def _resolve_columns(table: str, wanted: dict[str, list[str]], conn) -> dict[str, str]:
-    """Map logical name -> actual column on `table`, raising if something required is absent."""
-    from ..wrds_conn import describe_table
-
-    desc = describe_table(table, conn=conn)
-    name_col = "name" if "name" in desc.columns else desc.columns[0]
-    available = {str(c).lower() for c in desc[name_col]}
-    out: dict[str, str] = {}
-    for logical, candidates in wanted.items():
-        hit = next((c for c in candidates if c.lower() in available), None)
-        if hit is None:
-            raise KeyError(
-                f"{table} has no column for '{logical}'; tried {candidates}. "
-                f"Available: {sorted(available)}"
-            )
-        out[logical] = hit
-    return out
+    """Thin wrapper kept for readability at the call sites in this module."""
+    return resolve_columns(table, wanted, conn=conn)
 
 
 # ---------------------------------------------------------------------------

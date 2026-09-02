@@ -159,6 +159,16 @@ sanity:
   # Checkpoint 1: survivorship spot-checks.
   tsla_permno: 93436
   tsla_index_add_date: "2020-12-21"
+  # Checkpoint 2a: known splits. The adjusted series must show no jump on these dates
+  # while the raw series shows the full ratio. This is the Q11 trap, made a test.
+  splits:
+    - {permno: 14593, ticker: "AAPL", date: "2020-08-31", ratio: 4}
+    - {permno: 86580, ticker: "NVDA", date: "2021-07-20", ratio: 4}
+  # Checkpoint 2a: link coverage floor across universe (permno, entry_month) cells.
+  link_coverage_min: 0.98
+  # Checkpoint 2a: return-reconciliation fixture (one name, one clean year).
+  recon_permno: 14593
+  recon_year: 2019
   # Checkpoint 1: the ranking must be genuinely time-varying, not a static top-150.
   # Entry month -> tickers that must appear in that month's top-N.
   expected_top_members:

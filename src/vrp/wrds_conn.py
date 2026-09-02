@@ -208,6 +208,37 @@ def describe_table(qualified: str, *, conn=None, cfg: Config | None = None) -> p
     return conn.describe_table(library=schema, table=table)
 
 
+def resolve_columns(
+    table: str,
+    wanted: dict[str, list[str]],
+    *,
+    conn=None,
+    cfg: Config | None = None,
+    optional: Sequence[str] = (),
+) -> dict[str, str]:
+    """Map a logical column name onto whichever candidate actually exists on `table`.
+
+    CRSP and OptionMetrics vintages differ (the CRSP v2 tables rename nearly everything),
+    so no pull hard-codes a column name. A logical name listed in `optional` is omitted
+    from the result when none of its candidates exist; anything else raises.
+    """
+    desc = describe_table(table, conn=conn, cfg=cfg)
+    name_col = "name" if "name" in desc.columns else desc.columns[0]
+    available = {str(c).lower() for c in desc[name_col]}
+    out: dict[str, str] = {}
+    for logical, candidates in wanted.items():
+        hit = next((c for c in candidates if c.lower() in available), None)
+        if hit is None:
+            if logical in optional:
+                continue
+            raise KeyError(
+                f"{table} has no column for '{logical}'; tried {candidates}. "
+                f"Available: {sorted(available)}"
+            )
+        out[logical] = hit
+    return out
+
+
 def table_profile(
     qualified: str,
     *,

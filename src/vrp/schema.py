@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -309,6 +310,17 @@ def table_for(need: str, cfg: Config | None = None) -> str:
             )
             return target["table"]
     raise KeyError(f"no schema target named {need!r}")
+
+
+def opprcd_table_for_year(year: int, cfg: Config | None = None) -> str:
+    """The option price table for a given year, derived from the verified 2019 table.
+
+    IvyDB splits option prices by year (`optionm.opprcd2017` ... `opprcd2023`). Stage 0
+    verifies one of them; the rest follow by substituting the year, so a schema move (say
+    `optionm` -> `optionm_all`) is picked up everywhere from the single verified name.
+    """
+    verified = table_for("Daily option prices (2019 probe)", cfg)
+    return re.sub(r"\d{4}$", str(int(year)), verified)
 
 
 def render_notes(
