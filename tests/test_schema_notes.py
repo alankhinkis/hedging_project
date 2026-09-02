@@ -21,6 +21,7 @@ def finding(**kw) -> TableFinding:
         rows=100_000_000,
         date_min="1925-12-31",
         date_max="2024-12-31",
+        queryable=True,
     )
     base.update(kw)
     return TableFinding(**base)
@@ -36,13 +37,31 @@ GOOD_PROBES = {
 def test_checkpoint_0_passes_when_everything_resolves():
     results = checkpoint_0([finding()], GOOD_PROBES)
     assert all(ok for _, ok, _ in results)
-    assert len(results) == 5
+    assert len(results) == 6
 
 
 def test_unresolved_table_fails_the_checkpoint():
     results = dict((n, ok) for n, ok, _ in checkpoint_0([finding(resolved=None)], GOOD_PROBES))
     key = next(k for k in results if k.startswith("every schema target"))
     assert results[key] is False
+
+
+def test_listed_but_unqueryable_table_fails_the_checkpoint():
+    """A view can describe cleanly and still raise on any read -- every
+    optionm.distrprojd{YYYY} on this subscription does. Metadata is not proof of access."""
+    f = finding(queryable=False, note="LISTED BUT NOT QUERYABLE: relation does not exist")
+    results = dict((n, ok) for n, ok, _ in checkpoint_0([f], GOOD_PROBES))
+    key = next(k for k in results if "queryable" in k)
+    assert results[key] is False
+
+
+def test_optional_unqueryable_table_is_reported_but_does_not_fail():
+    """A table we checked, found unavailable, and deliberately routed around."""
+    f = finding(queryable=False, optional=True)
+    results = {n: (ok, d) for n, ok, d in checkpoint_0([f], GOOD_PROBES)}
+    key = next(k for k in results if "queryable" in k)
+    assert results[key][0] is True
+    assert "optional and unavailable" in results[key][1]
 
 
 def test_missing_key_column_fails_the_checkpoint():

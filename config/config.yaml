@@ -123,9 +123,14 @@ schema_targets:
   # look-ahead-free input for the escrowed-dividend adjustment (M9/Q5) -- on 2019-01-02 it
   # says what the market then expected, not what was later declared. Note the column is
   # `exdate`, not `ex_date` as in `distrd`.
+  # VERIFIED UNAVAILABLE 2026-09-02: every optionm.distrprojd{YYYY} view is listed and
+  # describes cleanly, but resolves to a missing optionm_all backing table and raises on
+  # any read. Marked optional so Checkpoint 0 reports it without failing; dividends come
+  # from `distrd` with a declaration-date filter instead. See docs/methodology.md.
   - need: "Projected dividends (point-in-time projection)"
     table: "optionm.distrprojd2019"
     confidence: high
+    optional: true
     key_columns: [secid, date, exdate, amount]
   - need: "OM historical volatility"
     table: "optionm.hvold"

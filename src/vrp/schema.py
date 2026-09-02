@@ -65,11 +65,17 @@ class TableFinding:
     rows: int | None = None
     date_min: str | None = None
     date_max: str | None = None
+    queryable: bool | None = None
+    optional: bool = False
     note: str = ""
 
     @property
     def ok(self) -> bool:
-        return self.resolved is not None and not self.missing_key_columns
+        return (
+            self.resolved is not None
+            and not self.missing_key_columns
+            and self.queryable is not False
+        )
 
 
 def _profile_one(target: dict[str, Any], fallbacks: dict[str, list[str]], conn) -> TableFinding:
@@ -103,6 +109,22 @@ def _profile_one(target: dict[str, Any], fallbacks: dict[str, list[str]], conn) 
 
     have = {c.lower() for c in finding.columns}
     finding.missing_key_columns = [c for c in target.get("key_columns", []) if c.lower() not in have]
+
+    # A resolved name with a full column list is NOT proof the table can be read. WRDS
+    # exposes these as views over an `optionm_all` backing table, and `describe_table` reads
+    # the view's metadata, which succeeds even when the backing table is absent -- every
+    # `optionm.distrprojd{YYYY}` on this subscription describes cleanly and then raises
+    # UndefinedTable on any actual query. So probe with a real read.
+    finding.optional = bool(target.get("optional", False))
+    try:
+        conn.raw_sql(f"SELECT 1 FROM {resolved} LIMIT 1")
+        finding.queryable = True
+    except Exception as exc:  # noqa: BLE001
+        finding.queryable = False
+        finding.note = (finding.note + " " if finding.note else "") + (
+            f"LISTED BUT NOT QUERYABLE: {str(exc).splitlines()[0][:120]}"
+        )
+        return finding
 
     prof = table_profile(resolved, date_col=_DATE_COL.get(need), conn=conn)
     finding.rows = prof.get("rows")
@@ -323,6 +345,49 @@ def opprcd_table_for_year(year: int, cfg: Config | None = None) -> str:
     return re.sub(r"\d{4}$", str(int(year)), verified)
 
 
+def available_year_tables(
+    verified: str,
+    years,
+    *,
+    conn=None,
+    cfg: Config | None = None,
+) -> list[tuple[int, str]]:
+    """Year-split tables that actually exist, from a verified example of the family.
+
+    IvyDB splits several files by year, and the families do not all cover the same span:
+    `opprcd` runs to 2025 while `distrprojd` stops at 2023. Assuming a uniform range raises
+    UndefinedTable at query time; assuming the *shortest* range silently drops data. So the
+    year list is intersected with what the server actually has, and the caller is told which
+    years it got.
+    """
+    schema, table = split_table(verified)
+    prefix = re.sub(r"\d{4}$", "", table)
+    conn = conn or get_connection(cfg)
+    try:
+        listed = set(conn.list_tables(library=schema))
+    except Exception:  # noqa: BLE001
+        listed = set()
+
+    out = []
+    for year in years:
+        name = f"{prefix}{int(year)}"
+        if listed and name not in listed:
+            continue
+        qualified = f"{schema}.{name}"
+        # `list_tables` is not sufficient on its own: WRDS exposes these as views over an
+        # `optionm_all` backing table, and a view can be listed while its backing table does
+        # not exist (`optionm.distrprojd2016` is listed but resolves to a missing
+        # `optionm_all.distrprojd2016`). Only a real query settles it, so probe each one.
+        try:
+            conn.raw_sql(f"SELECT 1 FROM {qualified} LIMIT 1")
+        except Exception as exc:  # noqa: BLE001
+            log.info("year table %s is listed but not queryable: %s",
+                     qualified, str(exc).splitlines()[0][:90])
+            continue
+        out.append((int(year), qualified))
+    return out
+
+
 def render_notes(
     findings: list[TableFinding],
     probes: dict[str, Any],
@@ -349,6 +414,9 @@ def render_notes(
         rows = f"{f.rows:,}" if isinstance(f.rows, int) else "—"
         if f.resolved is None:
             status = "❌ not found"
+        elif f.queryable is False:
+            status = ("⚠ listed but NOT queryable (optional)" if f.optional
+                      else "❌ listed but NOT queryable")
         elif f.missing_key_columns:
             status = "⚠ missing " + ", ".join(f"`{c}`" for c in f.missing_key_columns)
         elif f.resolved != f.guess:
@@ -396,6 +464,17 @@ def checkpoint_0(findings: list[TableFinding], probes: dict[str, Any]) -> list[t
         "every schema target resolves to a real table",
         not unresolved,
         "unresolved: " + ", ".join(unresolved) if unresolved else "all resolved",
+    ))
+
+    unreadable = [f.need for f in findings if f.queryable is False and not f.optional]
+    optional_unreadable = [f.need for f in findings if f.queryable is False and f.optional]
+    results.append((
+        "every required table is actually queryable, not just listed",
+        not unreadable,
+        ("unreadable: " + ", ".join(unreadable)) if unreadable
+        else ("all queryable" + (
+            f" (optional and unavailable: {', '.join(optional_unreadable)})"
+            if optional_unreadable else "")),
     ))
 
     missing = {f.need: f.missing_key_columns for f in findings if f.missing_key_columns}
