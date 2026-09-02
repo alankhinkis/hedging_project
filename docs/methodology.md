@@ -480,9 +480,92 @@ Other conditions: median |delta| 0.4985 (calls 0.4997, puts 0.4973); 0.01% of st
 ±10% of spot; all **2,304** December contracts expiring in January have January quotes, so the
 year-boundary `UNION` works; only 5 contracts of 27,977 have fewer than 10 path rows.
 
+### Weeklies excluded — the second decision made on evidence
+
+Stage 0 spotted `expiry_indicator = 'w'` and flagged the weekly question as "not yet decided".
+It then resolved itself by accident, and badly: weeklies were **52.7%** of the selected sample.
+
+| | standard monthlies | weeklies |
+|---|---:|---:|
+| positions | 13,224 | **14,753** |
+| median open interest | 807 | **21** |
+| median volume | 77 | **3** |
+| median relative spread | 5.5% | **8.8%** |
+| median DTE | 32 | 32 |
+
+Weeklies bought **no maturity precision** — the median DTE is identical — while carrying ~38×
+less open interest and 60% wider spreads. Their share also rose monotonically with size (Q1 42%
+→ Q5 66%), reintroducing a milder version of the composition tilt the entry-rule change had just
+removed. And because M18 (mean loss versus mean spread) is the binding test of economic
+significance for single names, carrying an 8.8%-spread half of the sample directly weakens the
+result that matters.
+
+Restricting to standard monthlies (`selection.standard_expirations_only: true`) costs 1.0% of
+positions and improves everything else:
+
+| | all expirations | monthlies only |
+|---|---:|---:|
+| positions | 27,977 | 27,696 |
+| median relative spread | 7.06% | **4.58%** |
+| median open interest | 113 | **1,130** |
+| median &#124;delta&#124; | 0.4985 | **0.4998** |
+| cap-quintile coverage spread (Q5−Q1) | +1.9pp | **0.0pp** |
+| coverage range by year | 95.2–99.8% | 91.0–99.5% |
+
+The only cost is the low end of the yearly coverage range (2017, when monthly-only chains were
+thinner) and a median DTE of 25 rather than 32 — both inside the 20–40 rule either way. The
+screen sits inside the logged cascade, so its 1,234,260 dropped rows appear in
+`output/tables/screen_cascade.csv` alongside every other screen rather than being applied
+invisibly.
+
+This is a liquidity and composition decision, not a results-driven one: it was made before any
+P&L existed, and it *reduces* N rather than hunting for significance.
+
+### Position-level exclusions (Q7), applied rather than merely counted
+
+Stage 2a pulled the delisting file and reported 25 events, but nothing consumed it. Two
+exclusions now run after selection, in `apply_position_filters`, and both are reported:
+
+| filter | dropped |
+|---|---:|
+| underlying delists during the hold (Q7) | 22 |
+| no stock price available through expiry | 16 |
+
+The first is the plan's Q7 rule: if the underlying is acquired or delisted before expiry, the
+option is early-terminated or converted and CRSP prices stop, so the hedge cannot honestly be
+carried to expiry. Closing at the delisting price would import its own assumptions.
+
+The second is subtly different and is not in the plan. Stage 4's terminal value is *intrinsic*,
+`max(S_T − K, 0)`, so a position whose expiry falls beyond the last available price for its
+underlying has no terminal value at all. Most of these are the same corporate actions, but the
+check is on data availability rather than on a delisting record existing — a name can stop being
+priced without a clean delisting row. Without this filter those 16 positions would reach Stage 4
+and produce a silently wrong P&L.
+
+38 of 27,696 positions are removed in total (0.14%), leaving **27,658**.
+
+### A note on ranking staleness after the entry-rule change
+
+Moving entry from the first of the month to the day after expiration lengthened the gap between
+the ranking month-end and the entry date from ~2 days to a **median of 21 days** (max 25). There
+is still zero look-ahead — the ranking month-end always strictly precedes entry, and it is the
+freshest month-end available on that date — but the universe is now ranked on data about three
+weeks old at entry. For a top-150 market-cap ranking that turns over 2–5 names a month this is
+immaterial, and the alternative (ranking on the month-end *inside* the entry month) would be
+look-ahead. Recorded here so the choice is visible rather than incidental.
+
+### Operational note: WRDS session limits
+
+Repeated script runs began failing with `SSL connection has been closed unexpectedly`, which
+presents like an authentication failure and sends the `wrds` client into an interactive username
+prompt — surfacing in a non-interactive run as a bare `EOFError`. It is neither: WRDS caps
+concurrent sessions per user, and a process that exits without calling `close()` leaves its
+session lingering server-side. `get_connection` now registers an `atexit` close and retries a
+failed connection three times with backoff before giving up.
+
 ### One number to carry into Stage 5
 
-Median relative bid-ask spread on the selected contracts is **7.1%** of the mid (mean 10.8%).
+Median relative bid-ask spread on the selected contracts is **4.6%** of the mid, after the weekly exclusion above (it was 7.1% with weeklies included).
 BK's economic-significance test (M18) compares the mean hedged loss against the mean spread,
 and on SPX they had a $0.43 loss against a $0.375 spread. Single-name spreads are proportionally
 far wider, so the M18 comparison is likely to be the binding constraint on whether any result

@@ -14,6 +14,7 @@ Credentials: WRDS_USERNAME comes from the environment or .env. The password belo
 
 from __future__ import annotations
 
+import atexit
 import hashlib
 import json
 import logging
@@ -61,16 +62,49 @@ def get_connection(cfg: Config | None = None, *, force_new: bool = False):
 
     log.info("Opening WRDS connection as %s ...", username)
     t0 = time.time()
-    try:
-        _CONN = wrds.Connection(wrds_username=username)
-    except Exception as exc:  # noqa: BLE001 - surface any auth/network failure uniformly
+    last_exc: Exception | None = None
+    for attempt in range(1, 4):
+        try:
+            _CONN = wrds.Connection(wrds_username=username)
+            break
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+            # A dropped SSL handshake is usually the session cap or a transient server-side
+            # reset, not bad credentials; back off and retry before giving up. Without this
+            # the wrds client falls through to an interactive username prompt, which in a
+            # non-interactive run surfaces as a confusing EOFError.
+            if attempt < 3:
+                log.warning("WRDS connection attempt %d failed (%s); retrying in %ds",
+                            attempt, str(exc).splitlines()[0][:90], 5 * attempt)
+                time.sleep(5 * attempt)
+    if _CONN is None:
+        exc = last_exc
         raise WRDSUnavailable(
             f"Could not connect to WRDS as '{username}': {exc}\n"
             "Check the username, and that ~/.pgpass has a line of the form\n"
             "    wrds-pgdata.wharton.upenn.edu:9737:wrds:<username>:<password>"
         ) from exc
     log.info("WRDS connection established in %.1fs", time.time() - t0)
+    # WRDS caps concurrent sessions per user, and a process that exits without closing
+    # leaves its session lingering server-side. Enough of those and the next connection is
+    # refused with "SSL connection has been closed unexpectedly", which looks like an auth
+    # failure but is not. Closing on exit keeps repeated script runs from exhausting the cap.
+    atexit.register(close_connection)
     return _CONN
+
+
+def close_connection() -> None:
+    """Close the process-wide connection if one is open. Safe to call repeatedly."""
+    global _CONN
+    if _CONN is None:
+        return
+    try:
+        _CONN.close()
+        log.debug("WRDS connection closed")
+    except Exception:  # noqa: BLE001 - never let teardown raise
+        pass
+    finally:
+        _CONN = None
 
 
 # ---------------------------------------------------------------------------

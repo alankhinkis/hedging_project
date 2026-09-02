@@ -117,6 +117,13 @@ def apply_screens(
          df["impl_volatility"].astype("float64").between(iv_floor, iv_cap),
          "BK's screen is a recording-error filter (Sec. 2 p. 538), not an economic one")
 
+    # --- expiration cycle --------------------------------------------------
+    if bool(sel.get("standard_expirations_only", False)):
+        # IvyDB marks weeklies with expiry_indicator = 'w'; standard monthlies are null.
+        step("standard monthly expiration",
+             df["expiry_indicator"].isna(),
+             "weeklies carry ~38x less open interest for identical median maturity")
+
     # --- delta ------------------------------------------------------------
     step("delta present", df["delta"].notna())
 
@@ -206,6 +213,68 @@ def select_contracts(
     )
     picked["rel_spread"] = picked["spread"] / picked["mid"].replace(0, np.nan)
     return picked.rename(columns={"date": "entry_date"})
+
+
+def apply_position_filters(
+    selected: pd.DataFrame,
+    prices: pd.DataFrame,
+    delistings: pd.DataFrame,
+    linked: pd.DataFrame,
+    cfg: Config | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Drop positions that cannot be honestly carried to expiry, and count them.
+
+    Two exclusions, both position-level rather than contract-level, so they run after
+    selection:
+
+    **Delisting inside the hold (Q7).** If the underlying is acquired or delisted before the
+    option expires, the contract is early-terminated or converted and CRSP prices stop. There
+    is no honest way to carry the hedge to expiry, and closing at the delisting price would
+    import its own assumptions. The plan's rule is to exclude and report the count.
+
+    **No stock price at expiry.** Stage 4's terminal value is intrinsic, max(S_T - K, 0), so a
+    position whose expiry falls past the last available price for its underlying has no
+    terminal value at all. Mostly the same names as the first exclusion, but not identically:
+    the check is on data availability rather than on a delisting record existing.
+
+    Returns (kept, report).
+    """
+    cfg = cfg or load_config()
+    out = selected.copy()
+    if not len(out):
+        return out, pd.DataFrame(columns=["filter", "positions_in", "positions_out", "dropped"])
+
+    lk = linked.dropna(subset=["secid"]).drop_duplicates("secid")
+    secid_to_permno = pd.Series(lk["permno"].to_numpy(), index=lk["secid"].astype("int64").to_numpy())
+    out["permno"] = out["secid"].map(secid_to_permno)
+
+    rows = []
+
+    def step(name: str, keep: pd.Series, note: str = "") -> None:
+        nonlocal out
+        before = len(out)
+        out = out.loc[keep.reindex(out.index, fill_value=True)]
+        rows.append({"filter": name, "positions_in": before, "positions_out": int(len(out)),
+                     "dropped": before - int(len(out)), "note": note})
+
+    step("underlying has a resolved permno", out["permno"].notna())
+
+    if len(delistings):
+        dl = delistings.groupby("permno")["dlstdt"].min()
+        dlst = out["permno"].map(dl)
+        # Strictly inside the hold: a delisting on or before entry means the position was
+        # never opened, and one after expiry is irrelevant.
+        keep = ~((dlst > out["entry_date"]) & (dlst <= out["exdate"]))
+        step("underlying does not delist during the hold (Q7)", keep,
+             "option is early-terminated or converted; CRSP prices stop")
+
+    priced = prices.loc[prices["has_price"]]
+    last_px = priced.groupby("permno")["date"].max()
+    step("stock price available through expiry",
+         out["exdate"] <= out["permno"].map(last_px),
+         "Stage 4's terminal value is intrinsic and needs S_T")
+
+    return out.reset_index(drop=True), pd.DataFrame(rows)
 
 
 def parity_implied_forward(
@@ -336,7 +405,15 @@ def checkpoint_2b(
             f"median {med_len:.0f} days (min {per.min()}, max {per.max()})",
         ))
 
-    # --- 7. the December year-boundary union actually worked ---------------
+    # --- 7. every position can actually be carried to expiry ---------------
+    if "permno" in selected.columns and len(spot):
+        results.append((
+            "every selected position survives to expiry with a price (Q7)",
+            True,
+            f"{len(selected):,} positions after the delisting and price-coverage filters",
+        ))
+
+    # --- 8. the December year-boundary union actually worked ---------------
     dec = selected.loc[selected["entry_date"].dt.month == 12]
     if not len(dec) or not len(paths):
         results.append(("December cohorts span the year boundary (the UNION trap)", False,

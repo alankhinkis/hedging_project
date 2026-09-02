@@ -46,6 +46,13 @@ selection:
   require_offer_above_bid: true
   ss_flag: "0"                  # standard settlement only
   contract_size: 100
+  # DECIDED 2026-09-02 on evidence. Weekly expirations were 53% of the selected sample with
+  # 38x less open interest (median 21 vs 807), 60% wider relative spreads (8.8% vs 5.5%) and
+  # IDENTICAL median maturity -- no precision gained, a lot of liquidity lost -- and their
+  # share rose with size (Q1 42% -> Q5 66%), reintroducing a size-linked composition tilt.
+  # Restricting to standard monthlies costs 1.0% of positions and flattens the cap-quintile
+  # coverage spread to 0.0%. See docs/methodology.md.
+  standard_expirations_only: true
 
 screens:
   # BK's implied-vol screen is a data-error filter, not an economic one (M11, Q8).

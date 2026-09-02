@@ -176,6 +176,7 @@ def test_each_screen_drops_only_its_own_row(cfg):
         {"optionid": 7, "impl_volatility": np.nan},       # no IV
         {"optionid": 8, "impl_volatility": 5.0},          # IV above the 300% cap
         {"optionid": 9, "delta": np.nan},                 # no delta
+        {"optionid": 10, "expiry_indicator": "w"},        # weekly, not a standard monthly
     ])
     kept, log = apply_screens(c, cfg)
     assert set(kept["optionid"]) == {1}
@@ -277,3 +278,83 @@ def test_coverage_ignores_stock_months_that_never_had_a_secid():
     cov = coverage_report(spec, selected, by="year")
     assert cov["stock_months"].iloc[0] == 1
     assert cov["coverage"].iloc[0] == pytest.approx(1.0)
+
+
+# ---------------------------------------------------------------------------
+# Expiration cycle and position-level filters
+# ---------------------------------------------------------------------------
+
+def test_weeklies_are_screened_out_when_configured(cfg):
+    """IvyDB marks weeklies with expiry_indicator='w'; standard monthlies are null."""
+    c = chain([
+        {"optionid": 1, "expiry_indicator": None},
+        {"optionid": 2, "expiry_indicator": "w"},
+    ])
+    kept, log = apply_screens(c, cfg)
+    assert set(kept["optionid"]) == {1}
+    row = log.loc[log["screen"] == "standard monthly expiration"].iloc[0]
+    assert row["rows_dropped"] == 1
+
+
+def test_position_filters_drop_a_delisting_inside_the_hold():
+    from vrp.selection import apply_position_filters
+    sel = pd.DataFrame({
+        "secid": [1, 2, 3],
+        "optionid": [10, 20, 30],
+        "entry_date": pd.to_datetime(["2019-01-22"] * 3),
+        "exdate": pd.to_datetime(["2019-02-15"] * 3),
+    })
+    linked = pd.DataFrame({"permno": [101, 102, 103], "secid": [1, 2, 3],
+                           "date": pd.to_datetime(["2019-01-22"] * 3)})
+    prices = pd.DataFrame({
+        "permno": [101, 102, 103],
+        "date": pd.to_datetime(["2019-03-01"] * 3),
+        "has_price": True,
+    })
+    delist = pd.DataFrame({
+        "permno": [102, 103],
+        # 102 delists mid-hold -> excluded; 103 delists after expiry -> kept.
+        "dlstdt": pd.to_datetime(["2019-02-01", "2019-06-01"]),
+    })
+    kept, report = apply_position_filters(sel, prices, delist, linked)
+    assert set(kept["secid"]) == {1, 3}
+    q7 = report.loc[report["filter"].str.contains("delist")].iloc[0]
+    assert q7["dropped"] == 1
+
+
+def test_position_filters_drop_positions_with_no_price_at_expiry():
+    from vrp.selection import apply_position_filters
+    sel = pd.DataFrame({
+        "secid": [1, 2],
+        "optionid": [10, 20],
+        "entry_date": pd.to_datetime(["2019-01-22"] * 2),
+        "exdate": pd.to_datetime(["2019-02-15"] * 2),
+    })
+    linked = pd.DataFrame({"permno": [101, 102], "secid": [1, 2],
+                           "date": pd.to_datetime(["2019-01-22"] * 2)})
+    prices = pd.DataFrame({
+        "permno": [101, 102],
+        # permno 102's price series stops before expiry -> no S_T for the intrinsic value.
+        "date": pd.to_datetime(["2019-03-01", "2019-02-01"]),
+        "has_price": True,
+    })
+    kept, report = apply_position_filters(sel, prices, pd.DataFrame(), linked)
+    assert set(kept["secid"]) == {1}
+    px = report.loc[report["filter"].str.contains("price available")].iloc[0]
+    assert px["dropped"] == 1
+
+
+def test_position_filters_keep_a_delisting_outside_the_hold():
+    """A delisting on the entry date or after expiry must not remove the position."""
+    from vrp.selection import apply_position_filters
+    sel = pd.DataFrame({
+        "secid": [1], "optionid": [10],
+        "entry_date": pd.to_datetime(["2019-01-22"]),
+        "exdate": pd.to_datetime(["2019-02-15"]),
+    })
+    linked = pd.DataFrame({"permno": [101], "secid": [1],
+                           "date": pd.to_datetime(["2019-01-22"])})
+    prices = pd.DataFrame({"permno": [101], "date": pd.to_datetime(["2019-03-01"]),
+                           "has_price": True})
+    on_entry = pd.DataFrame({"permno": [101], "dlstdt": pd.to_datetime(["2019-01-22"])})
+    assert len(apply_position_filters(sel, prices, on_entry, linked)[0]) == 1

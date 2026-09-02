@@ -26,7 +26,7 @@ significantly negative mean gain implies a negative volatility risk premium.
 | 0 — environment + schema recon | verify every WRDS table name and column | ✅ **complete** — 12/12 tables verified, Checkpoint 0 passes |
 | 1 — point-in-time universe | top-150 S&P 500 by month-end market cap | ✅ **complete** — 84 months × 150 names, Checkpoint 1 passes |
 | 2a — CRSP prices + OM↔CRSP link | daily prices, split adjustment, secid mapping | ✅ **complete** — 479,878 rows, 100% link coverage, Checkpoint 2a passes |
-| 2b — option chains | screens, contract selection, holding paths | ✅ **complete** — 27,977 positions, 97%+ coverage, Checkpoint 2b passes |
+| 2b — option chains | screens, contract selection, holding paths | ✅ **complete** — 27,658 positions (monthlies only), Checkpoint 2b passes |
 | 3 — physical volatility (VOL^h, VOL^g) | | next |
 | 4 — the delta-hedging engine | | not started |
 | 4.5 — SPX anchor | | not started |

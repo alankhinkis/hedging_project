@@ -27,6 +27,7 @@ import pandas as pd  # noqa: E402
 from vrp.config import load_config  # noqa: E402
 from vrp.data.option_chains import fetch_paths  # noqa: E402
 from vrp.selection import (  # noqa: E402
+    apply_position_filters,
     apply_screens,
     checkpoint_2b,
     coverage_report,
@@ -105,12 +106,36 @@ def main() -> int:
     print(f"  at BK's literal {literal_cap:.0%} IV cap: {len(selected_lit):,} positions "
           f"({len(selected) - len(selected_lit):+,} difference)")
 
+    # Position-level exclusions (Q7 delisting, and no S_T for the intrinsic terminal value).
+    delist_path = interim / "delistings.parquet"
+    delistings = pd.read_parquet(delist_path) if delist_path.exists() else pd.DataFrame()
+    selected, pos_report = apply_position_filters(selected, prices, delistings, linked, cfg)
+    selected_lit, _ = apply_position_filters(selected_lit, prices, delistings, linked, cfg)
+    if len(pos_report):
+        print("\nposition-level exclusions:")
+        print(pos_report.to_string(index=False))
+        print(f"  surviving positions: {len(selected):,}")
+
     cov_year = coverage_report(spec, selected, by="year")
     print("\ncoverage by year:")
     print(cov_year[["group", "stock_months", "with_call", "with_put", "coverage"]]
           .to_string(index=False))
 
     # --- Pass B ------------------------------------------------------------
+    # A paths file from a previous run describes a DIFFERENT set of contracts. Leaving it in
+    # place after a selection change would let Stage 4 silently mark positions to quotes that
+    # belong to contracts we no longer hold, so it is retired before Pass B runs.
+    paths_path = interim / "option_paths.parquet"
+    if paths_path.exists():
+        existing = pd.read_parquet(paths_path, columns=["optionid"])
+        want = set(selected["optionid"].astype("int64"))
+        if not want.issubset(set(existing["optionid"].astype("int64"))):
+            stale = paths_path.with_suffix(".parquet.stale")
+            stale.unlink(missing_ok=True)
+            paths_path.rename(stale)
+            print(f"\nretired stale {paths_path.name} "
+                  f"(does not cover the current selection) -> {stale.name}")
+
     paths = pd.DataFrame()
     if not args.skip_paths and len(selected):
         try:
@@ -129,6 +154,7 @@ def main() -> int:
         paths.to_parquet(interim / "option_paths.parquet", index=False)
 
     screen_log.to_csv(cfg.output_tables / "screen_cascade.csv", index=False)
+    pos_report.to_csv(cfg.output_tables / "position_exclusions.csv", index=False)
     screen_log_lit.to_csv(cfg.output_tables / "screen_cascade_iv100.csv", index=False)
     cov_year.to_csv(cfg.output_tables / "coverage_by_year.csv", index=False)
     coverage_report(spec, selected, by="month").to_csv(
