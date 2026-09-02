@@ -26,8 +26,8 @@ significantly negative mean gain implies a negative volatility risk premium.
 | 0 — environment + schema recon | verify every WRDS table name and column | ✅ **complete** — 12/12 tables verified, Checkpoint 0 passes |
 | 1 — point-in-time universe | top-150 S&P 500 by month-end market cap | ✅ **complete** — 84 months × 150 names, Checkpoint 1 passes |
 | 2a — CRSP prices + OM↔CRSP link | daily prices, split adjustment, secid mapping | ✅ **complete** — 479,878 rows, 100% link coverage, Checkpoint 2a passes |
-| 2b — option chains | | next |
-| 3 — physical volatility (VOL^h, VOL^g) | | not started |
+| 2b — option chains | screens, contract selection, holding paths | ✅ **complete** — 27,977 positions, 97%+ coverage, Checkpoint 2b passes |
+| 3 — physical volatility (VOL^h, VOL^g) | | next |
 | 4 — the delta-hedging engine | | not started |
 | 4.5 — SPX anchor | | not started |
 | 5 — statistical analysis | | not started |
@@ -70,6 +70,8 @@ can be chained without silently building on broken data.
 python scripts/00_verify_schema.py     # writes docs/wrds_schema_notes.md + _resolved.json
 python scripts/01_build_universe.py    # writes data/interim/universe.parquet
 python scripts/02_pull_crsp.py         # writes prices/link/linked_panel/entry_calendar
+python scripts/03_pull_options.py      # Pass A candidates + zero curve + dividends
+python scripts/04_select_contracts.py  # screens, selection, Pass B paths
 ```
 
 Every WRDS query is cached to parquet under `data/raw/`, keyed by a hash of the SQL and its bound
@@ -87,6 +89,9 @@ src/vrp/               the library
   data/universe.py     Stage 1: point-in-time membership + ranking, Checkpoint 1
   data/crsp_prices.py  Stage 2a: price cleaning, split normalisation, Checkpoint 2a
   data/linking.py      Stage 2a: OM↔CRSP link, date-ranged join, activity tie-break
+  data/option_chains.py Stage 2b: two-pass chain pull, December year-boundary union
+  data/rates_divs.py   Stage 2b: zero curve interpolation, escrowed dividends
+  selection.py         Stage 2b: screen cascade with drop accounting, Checkpoint 2b
 scripts/0N_*.py        one thin wrapper per stage
 tests/                 unit tests that run without WRDS
 docs/PHASE1_PLAN.md    the build plan (read this first)

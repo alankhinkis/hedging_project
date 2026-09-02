@@ -22,6 +22,7 @@ from vrp.data.crsp_prices import (  # noqa: E402
     clean_prices,
     fetch_daily_prices,
     fetch_delistings,
+    entry_calendar,
     first_trading_days,
 )
 from vrp.data.linking import (  # noqa: E402
@@ -132,7 +133,8 @@ def main() -> int:
     print(f"link coverage: {cov['coverage']:.2%} of universe cells; "
           f"{cov['n_permnos_missing']} permnos unlinked")
 
-    calendar = first_trading_days(prices)
+    calendar = entry_calendar(prices, cfg)
+    alt = first_trading_days(prices)
 
     # --- persist ----------------------------------------------------------
     prices.to_parquet(cfg.data_interim / "prices.parquet", index=False)
@@ -143,8 +145,13 @@ def main() -> int:
     cal_out = calendar.copy()
     cal_out["entry_month"] = cal_out["entry_month"].astype(str)
     cal_out.to_parquet(cfg.data_interim / "entry_calendar.parquet", index=False)
-    print(f"\nentry calendar: {len(calendar)} first-trading-days, "
-          f"{calendar['entry_date'].min().date()} to {calendar['entry_date'].max().date()}")
+    print(f"
+entry calendar [{cfg['selection']['entry_rule']}]: "
+          f"{len(calendar)} dates, {calendar['entry_date'].min().date()} "
+          f"to {calendar['entry_date'].max().date()}")
+    cmp = calendar.merge(alt, on="entry_month", suffixes=("", "_fom"))
+    offset = (cmp["entry_date"] - cmp["entry_date_fom"]).dt.days
+    print(f"  median offset vs the first-of-month rule: +{offset.median():.0f} days")
 
     fig_path = plot_splits(prices, cfg)
     if fig_path:

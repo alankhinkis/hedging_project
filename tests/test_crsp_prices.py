@@ -234,3 +234,71 @@ def test_delisted_before_is_strict():
     assert not delisted_before(delist, 7, "2019-06-15")     # strictly before
     assert not delisted_before(delist, 8, "2020-01-01")
     assert not delisted_before(pd.DataFrame(), 7, "2020-01-01")
+
+
+# ---------------------------------------------------------------------------
+# Entry-timing rule (Q10, revised)
+# ---------------------------------------------------------------------------
+
+def test_third_friday_is_the_monthly_expiration():
+    from vrp.data.crsp_prices import third_friday
+    assert third_friday(2019, 3) == pd.Timestamp("2019-03-15")
+    assert third_friday(2020, 8) == pd.Timestamp("2020-08-21")
+    # A month starting on a Friday still yields the third Friday, not the second.
+    assert third_friday(2021, 1) == pd.Timestamp("2021-01-15")
+
+
+def test_post_expiry_entry_is_the_next_trading_day_after_expiration():
+    from vrp.data.crsp_prices import post_expiry_entry_days
+    cal = pd.bdate_range("2019-03-01", "2019-04-30")
+    prices = pd.DataFrame({"permno": 1, "date": cal})
+    entries = post_expiry_entry_days(prices).set_index("entry_month")["entry_date"]
+    # 2019-03-15 is the third Friday, so March's entry is Monday the 18th.
+    assert entries[pd.Period("2019-03", "M")] == pd.Timestamp("2019-03-18")
+
+
+def test_post_expiry_entry_skips_a_holiday_after_expiration():
+    """If the Monday after expiration is closed, entry moves to the next open day."""
+    from vrp.data.crsp_prices import post_expiry_entry_days
+    cal = [d for d in pd.bdate_range("2019-03-01", "2019-03-29")
+           if d != pd.Timestamp("2019-03-18")]
+    prices = pd.DataFrame({"permno": 1, "date": pd.DatetimeIndex(cal)})
+    entries = post_expiry_entry_days(prices).set_index("entry_month")["entry_date"]
+    assert entries[pd.Period("2019-03", "M")] == pd.Timestamp("2019-03-19")
+
+
+def test_post_expiry_entry_leaves_about_thirty_days_to_the_next_expiration():
+    """The whole point of the rule: the NEXT monthly expiry lands inside the 20-40 window
+    for every name, whether or not it has weekly options."""
+    from vrp.data.crsp_prices import post_expiry_entry_days, third_friday
+    cal = pd.bdate_range("2019-01-01", "2023-12-31")
+    prices = pd.DataFrame({"permno": 1, "date": cal})
+    entries = post_expiry_entry_days(prices)
+    gaps = []
+    for _, row in entries.iterrows():
+        nxt = row["entry_month"] + 1
+        gaps.append((third_friday(nxt.year, nxt.month) - row["entry_date"]).days)
+    gaps = pd.Series(gaps)
+    # The containment is the property that matters. The gap alternates 25/32 days
+    # depending on where the two third-Fridays fall, so the median is not ~30 -- but every
+    # value clears the window, which is what full coverage depends on.
+    assert gaps.between(20, 40).all(), f"out-of-window gaps: {sorted(set(gaps))}"
+    assert set(gaps.unique()) <= {25, 32}
+    assert 24 <= gaps.median() <= 32
+
+
+def test_entry_calendar_honours_the_configured_rule():
+    from vrp.config import Config
+    from vrp.data.crsp_prices import entry_calendar
+    from pathlib import Path
+    prices = pd.DataFrame({"permno": 1, "date": pd.bdate_range("2019-03-01", "2019-03-29")})
+
+    def cfg_for(rule):
+        return Config(raw={"selection": {"entry_rule": rule}, "paths": {}}, root=Path("."))
+
+    first = entry_calendar(prices, cfg_for("first_trading_day_of_month"))
+    assert first["entry_date"].iloc[0] == pd.Timestamp("2019-03-01")
+    post = entry_calendar(prices, cfg_for("first_trading_day_after_monthly_expiry"))
+    assert post["entry_date"].iloc[0] == pd.Timestamp("2019-03-18")
+    with pytest.raises(ValueError):
+        entry_calendar(prices, cfg_for("nonsense"))

@@ -4,7 +4,7 @@ The "why did you do it that way" document. Written incrementally at each stage g
 end. Plan references (M#, Q#, Checkpoint N) point at `PHASE1_PLAN.md`; paper references are to
 Bakshi & Kapadia (2003, RFS 16(2), 527–566), `bakshi_kapadia_2003_rfs.pdf`.
 
-**Sections are added as stages complete.** Stages 0 and 1 are written up below.
+**Sections are added as stages complete.** Stages 0 through 2b are written up below.
 
 ---
 
@@ -372,7 +372,126 @@ instead of 250.
 
 ---
 
+## Stage 2b — Option chains, screens and contract selection
+
+4,515,325 candidate rows across 240 secids and 84 entry dates; **27,977 selected positions**
+(14,061 calls, 13,916 puts); 655,537 Pass B path rows. All seven Checkpoint 2b conditions pass.
+
+### Filtering: server-side for volume, client-side for judgment
+
+Only volume reducers go in the SQL — `secid IN (...)`, `date IN (entry dates)`, and a DTE
+window pulled deliberately wider than the selection rule. The plan's Pass A query
+(`PHASE1_PLAN.md:370`) puts the economic screens in the `WHERE` clause too, but the plan also
+requires reporting coverage by year and cap quintile (Q9) and an IV-cap robustness row at both
+100% and 300% (Q8). **Neither is computable from rows that never arrived.** Filtering
+server-side would mean re-querying WRDS to answer questions the cache should already answer.
+The cost of pulling wide is ~4.5M rows and four minutes, once.
+
+Each screen therefore runs in pandas and logs what it dropped, to
+`output/tables/screen_cascade.csv`. The two large ones are open interest (1.95M rows, 51%) and
+positive bid (713k, 16%) — but note they remove *rows*, not stock-months: the stock-month count
+holds at ~14,451 through the entire cascade. That immediately localised the coverage problem
+below to the selection rule rather than to the screens.
+
+### Q10 revised on evidence: entry moves to the day after monthly expiration
+
+This is the most consequential decision in the stage, and it was made by measurement rather
+than by argument.
+
+The pre-committed rule was "first trading day of each calendar month". Run that way, coverage
+came out at **82.1%**, and the shortfall was not random:
+
+| within-month cap quintile | 1 (small) | 2 | 3 | 4 | 5 (large) |
+|---|---:|---:|---:|---:|---:|
+| coverage, first-of-month entry | **64.2%** | 71.2% | 83.9% | 91.7% | 99.6% |
+
+Diagnosis: 98.4% of the missing stock-months (2,247 of 2,284) had **no expiration at all**
+inside the 20–40 day window. Entering on the 1st puts that month's standard expiry (the third
+Friday) about 18 days out and the next one about 46 — nothing in between. Only names with
+**weekly** options have anything in the window, and weeklies are listed on the largest, most
+liquid names. So the first-of-month rule silently selects on option-market development, which
+proxies for size. That is a selection bias capable of producing a result on its own, and it
+biases *against* the cross-sectional question the extension exists to ask: Cao & Han's
+idiosyncratic-volatility channel lives disproportionately in the smaller names being dropped.
+
+The plan itself named the alternative under Q10 — "a fixed number of days before monthly
+expiration gives cleaner ~30-day maturities but correlates entry dates with the expiration
+cycle". Measured, that alternative is decisive:
+
+| entry rule (DTE window unchanged at 20–40) | overall | Q1 | Q5 |
+|---|---:|---:|---:|
+| first trading day of month | 82.1% | 64.2% | 99.6% |
+| **first trading day after monthly expiry** | **100.0%** | 99.8% | 100.0% |
+
+Entering the day after expiration puts the *next* monthly expiration 25–32 days out for every
+name, whether or not it has weeklies. Realised coverage after the switch is 95.2–99.8% by year
+with a Q5−Q1 spread of **+1.9 points**, down from +35.7. Maturity also tightened: selected DTE
+now spans 24–32 days against 21–36 before.
+
+The stated cost — entry dates correlate with the expiration cycle — is real but is here the
+*mechanism* rather than a side effect: it is what makes maturity uniform across the
+cross-section instead of conditional on whether a name has weeklies. It also aligns the design
+with the single-name literature this extends.
+
+Both rules remain implemented (`first_trading_days` and `post_expiry_entry_days`), selected by
+`config.yaml:selection.entry_rule`, so the comparison above is reproducible rather than a
+discarded experiment. **The revision changes sample construction, not the hypothesis or any
+result, and it was made before any P&L existed.**
+
+### Two data findings that changed the plan
+
+**The projected-dividend file does not exist on this subscription.** Every
+`optionm.distrprojd{YYYY}` view is listed by `list_tables` and describes cleanly through
+`describe_table`, then raises `UndefinedTable` on any read — they resolve to missing
+`optionm_all` backing tables. Stage 0 had passed them for exactly that reason: metadata is not
+proof of access. Stage 0 now probes each resolved table with a real `SELECT ... LIMIT 1` and
+Checkpoint 0 has a condition for it; a target can be marked `optional` so a
+checked-and-unavailable table is reported without failing the gate.
+
+Dividends therefore come from `optionm.distrd` (announced distributions), restricted to
+ordinary cash (`distr_type = '1'`, 96.4% of rows) and uncancelled. It carries `declare_date` on
+100% of 178,408 rows, which turns the look-ahead question into a measurement rather than an
+assumption: `pv_dividends(..., known_only=True)` counts only dividends already declared as of
+the valuation date. The default counts every dividend with an ex-date in the option's life,
+matching BK's escrowed treatment (M9) and what the market prices for a regular quarterly payer.
+The distinction is not cosmetic — the **median declaration lead is 26 days against a ~30-day
+hold** (8 days for AAPL specifically), so a strict known-only rule would discard most of the
+dividends the market was visibly pricing. Both are computed; the difference is reported.
+
+**Pass B was pulling pre-entry quotes.** The path query uses one date window per year for all
+of that year's contracts, but an `optionid` is listed months before we enter it, so each
+contract came back with quotes stretching back before its own entry date. Paths are now trimmed
+to each contract's own life. Checkpoint 2b's path-length condition is what caught it: median 35
+rows before the fix, 24 after, against ~21–22 trading days in a 30-calendar-day hold.
+
+### Validation
+
+**Put-call parity on 586,142 same-strike pairs.** The plan proposes checking parity on the
+selected call and put, but those sit at different strikes (a ~0.50-delta call and a ~−0.50-delta
+put rarely share one), so a naive check is impossible. The candidate chain is full of
+same-strike pairs, and for each, European parity gives the forward directly:
+`F = K + e^{r*tau}(C − P)`. Comparing that against `S*e^{r*tau}` clears the strike ÷1000
+scaling, the rate units (percent vs decimal), the `cp_flag` sign convention and the
+secid→spot linkage in a single test. Result: **median error −1.3 bp, IQR 22.7 bp**. The small
+negative bias is expected and is not an error — these are American options on dividend-paying
+stocks, and both early exercise and dividends push the put side up and the implied forward down.
+
+Other conditions: median |delta| 0.4985 (calls 0.4997, puts 0.4973); 0.01% of strikes outside
+±10% of spot; all **2,304** December contracts expiring in January have January quotes, so the
+year-boundary `UNION` works; only 5 contracts of 27,977 have fewer than 10 path rows.
+
+### One number to carry into Stage 5
+
+Median relative bid-ask spread on the selected contracts is **7.1%** of the mid (mean 10.8%).
+BK's economic-significance test (M18) compares the mean hedged loss against the mean spread,
+and on SPX they had a $0.43 loss against a $0.375 spread. Single-name spreads are proportionally
+far wider, so the M18 comparison is likely to be the binding constraint on whether any result
+here is economically meaningful — not a footnote. It belongs in the main table, as the plan says.
+
+---
+
 ## Decisions already fixed (from the planning session, 2026-09-01)
+
 
 Recorded here so they are visibly pre-committed, before any results exist.
 

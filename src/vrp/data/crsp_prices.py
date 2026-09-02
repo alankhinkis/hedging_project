@@ -240,12 +240,66 @@ def trading_calendar(prices: pd.DataFrame) -> pd.DatetimeIndex:
 
 
 def first_trading_days(prices: pd.DataFrame) -> pd.DataFrame:
-    """First trading day of each calendar month (Q10: the entry-date rule)."""
+    """First trading day of each calendar month.
+
+    The plan's original Q10 rule. Retained because it is the robustness comparison for
+    `post_expiry_entry_days`, and because the coverage gap between the two is a reportable
+    result rather than a discarded experiment.
+    """
     cal = pd.Series(trading_calendar(prices), name="date")
     month = cal.dt.to_period("M")
     firsts = cal.groupby(month).min().rename("entry_date").reset_index()
     firsts.columns = ["entry_month", "entry_date"]
     return firsts
+
+
+def third_friday(year: int, month: int) -> pd.Timestamp:
+    """The standard US equity-option monthly expiration date for a month."""
+    start = pd.Timestamp(year=int(year), month=int(month), day=1)
+    fridays = pd.date_range(start, start + pd.offsets.MonthEnd(0), freq="W-FRI")
+    return fridays[2]
+
+
+def post_expiry_entry_days(prices: pd.DataFrame) -> pd.DataFrame:
+    """First trading day AFTER each month's monthly expiration (the Q10 rule in force).
+
+    Why this rather than the first trading day of the month. Entering on the 1st puts the
+    near monthly expiry ~18 days out and the following one ~46 -- neither inside a 20-40 day
+    window. Only names with weekly options have anything in the window, so a first-of-month
+    rule silently selects on the presence of weeklies, which tracks size: measured coverage
+    was 64.2% in the smallest within-month cap quintile against 99.6% in the largest.
+
+    Entering the day after expiration instead puts the *next* monthly expiration ~28 days
+    out for every name, weeklies or not. Measured coverage is 100.0% and flat across
+    quintiles, with the 20-40 day window unchanged.
+
+    The cost, which the plan named: entry dates now correlate with the expiration cycle.
+    Here that is the mechanism, not a side effect -- it is what makes maturity uniform
+    across the cross-section instead of conditional on option-market development.
+    """
+    cal = trading_calendar(prices)
+    if not len(cal):
+        return pd.DataFrame(columns=["entry_month", "entry_date"])
+    months = pd.period_range(cal.min().to_period("M"), cal.max().to_period("M"), freq="M")
+
+    rows = []
+    for period in months:
+        expiry = third_friday(period.year, period.month)
+        after = cal[cal > expiry]
+        if len(after):
+            rows.append({"entry_month": period, "entry_date": after[0]})
+    return pd.DataFrame(rows)
+
+
+def entry_calendar(prices: pd.DataFrame, cfg: Config | None = None) -> pd.DataFrame:
+    """Entry dates under the configured rule (config.yaml: selection.entry_rule)."""
+    cfg = cfg or load_config()
+    rule = str(cfg["selection"].get("entry_rule", "first_trading_day_after_monthly_expiry"))
+    if rule == "first_trading_day_of_month":
+        return first_trading_days(prices)
+    if rule == "first_trading_day_after_monthly_expiry":
+        return post_expiry_entry_days(prices)
+    raise ValueError(f"unknown selection.entry_rule {rule!r}")
 
 
 def delisted_before(

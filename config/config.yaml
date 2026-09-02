@@ -29,7 +29,13 @@ dev:
 
 selection:
   # Contract selection (Stage 2b). Not used by Stage 0/1 but fixed here before any results exist.
-  entry_rule: "first_trading_day_of_month"   # Q10
+  # Q10, REVISED 2026-09-02 on evidence (see docs/methodology.md). The original
+  # "first_trading_day_of_month" is structurally incompatible with a 20-40 day window:
+  # from the 1st, the near monthly expiry is ~18 days out and the next ~46, so only names
+  # with weeklies qualify -- coverage 82.1% overall but 64.2% in the smallest cap quintile
+  # against 99.6% in the largest. Entering after expiration puts the next monthly ~28 days
+  # out for every name: 100.0% coverage, flat across quintiles, same DTE window.
+  entry_rule: "first_trading_day_after_monthly_expiry"
   dte_min: 20
   dte_max: 40
   dte_target: 30
