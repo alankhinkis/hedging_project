@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vrp"
+version = "0.1.0"
+description = "Delta-hedged gains and the volatility risk premium in single-name equity options"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=2.3",
+    "pandas>=2.2,<2.3",
+    "scipy>=1.16",
+    "statsmodels>=0.14",
+    "wrds>=3.5",
+    "pyarrow>=20",
+    "arch>=8.0",
+    "PyYAML>=6.0",
+    "python-dotenv>=1.0",
+    "matplotlib>=3.9",
+    "tqdm>=4.66",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ipython", "jupyter"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+src = ["src", "scripts", "tests"]

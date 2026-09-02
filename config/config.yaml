@@ -1,0 +1,154 @@
+# Delta-hedged gains in the cross-section of individual equity options.
+# Every threshold the build depends on lives here. Nothing downstream hard-codes a date,
+# a universe size, or a filter cut-off. Plan references (M#, Q#) point at docs/PHASE1_PLAN.md.
+
+sample:
+  # Analysis window for option positions.
+  start_date: "2017-01-01"
+  end_date: "2023-12-31"
+  # December-2023 entries are held into January 2024, so price/option pulls run past end_date.
+  hold_buffer_end: "2024-02-29"
+  # 12-month burn-in before start_date for volatility estimation (Stage 3).
+  burnin_start: "2016-01-01"
+
+universe:
+  # Point-in-time S&P 500 membership, ranked by month-end market cap.
+  top_n: 150
+  # Month-end member counts outside this band mean the point-in-time join is wrong (Checkpoint 1).
+  expected_members_min: 480
+  expected_members_max: 520
+  # Distinct permnos across the whole sample. ~150 means survivorship bias has crept back in.
+  expected_distinct_permnos_min: 200
+
+# The dev subsample. Every scripts/0N_*.py defaults to this; --permnos/--years override.
+# Rule: 1 stock, 1 year must pass before a stage scales to 150 x 7.
+dev:
+  permnos: [14593]        # AAPL
+  years: [2019]
+  tickers: ["AAPL"]
+
+selection:
+  # Contract selection (Stage 2b). Not used by Stage 0/1 but fixed here before any results exist.
+  entry_rule: "first_trading_day_of_month"   # Q10
+  dte_min: 20
+  dte_max: 40
+  dte_target: 30
+  delta_band: [0.35, 0.65]      # pre-filter; final pick is nearest |delta| to 0.50
+  delta_target: 0.50
+  min_open_interest: 1
+  require_positive_bid: true
+  require_offer_above_bid: true
+  ss_flag: "0"                  # standard settlement only
+  contract_size: 100
+
+screens:
+  # BK's implied-vol screen is a data-error filter, not an economic one (M11, Q8).
+  # Primary cap is 300%; the paper's literal 100% is reported as a robustness row.
+  iv_floor: 0.01
+  iv_cap_primary: 3.00
+  iv_cap_literal: 1.00
+
+vol:
+  # Stage 3. VOL^h window is 30 calendar days per BK Sec. 5 (Q3); 60 is a stability check.
+  realized_window_days: 30
+  realized_window_days_alt: 60
+  trading_days_per_year: 252
+  garch_refit: "annual"         # M6: re-estimated annually on the trailing year
+
+rates:
+  # Q6: deliberate deviation from BK's put-call-parity rate (M10).
+  source: "optionm.zerocd"
+  interpolation: "linear_in_days"
+
+paths:
+  data_raw: "data/raw"
+  data_interim: "data/interim"
+  data_processed: "data/processed"
+  output_tables: "output/tables"
+  output_figures: "output/figures"
+  docs: "docs"
+
+wrds:
+  # Overridden by WRDS_USERNAME in .env or the environment.
+  username: null
+  # Query results are cached to parquet under data/raw keyed by a hash of the SQL.
+  cache: true
+
+# Stage 0 schema reconnaissance targets. Each entry is a *guess* to be verified; the
+# verified truth lands in docs/wrds_schema_notes.md. `confidence` mirrors the plan's table.
+schema_targets:
+  - need: "S&P 500 point-in-time membership"
+    table: "crsp.dsp500list"
+    confidence: high
+    key_columns: [permno, start, ending]
+  - need: "Monthly market cap"
+    table: "crsp.msf"
+    confidence: high
+    key_columns: [permno, date, prc, shrout]
+  - need: "Daily stock prices"
+    table: "crsp.dsf"
+    confidence: high
+    key_columns: [permno, date, prc, ret, cfacpr, cfacshr, shrout, bidlo, askhi, vol, openprc]
+  - need: "CRSP name history"
+    table: "crsp.dsenames"
+    confidence: medium
+    key_columns: [permno, namedt, nameendt, ticker, comnam, shrcd, exchcd]
+  - need: "Delisting returns"
+    table: "crsp.dsedelist"
+    confidence: medium
+    key_columns: [permno, dlstdt, dlret, dlstcd]
+  - need: "Daily option prices (2019 probe)"
+    table: "optionm.opprcd2019"
+    confidence: high
+    key_columns: [secid, date, exdate, optionid, cp_flag, strike_price, best_bid, best_offer,
+                  impl_volatility, delta, vega, gamma, cfadj, ss_flag, contract_size, exercise_style,
+                  volume, open_interest]
+  - need: "OptionMetrics security master"
+    table: "optionm.securd"
+    confidence: medium
+    key_columns: [secid, cusip, ticker, index_flag, issue_type]
+  - need: "Zero-coupon curve"
+    table: "optionm.zerocd"
+    confidence: high
+    key_columns: [date, days, rate]
+  - need: "Projected dividends (discrete)"
+    table: "optionm.distrd"
+    confidence: medium
+    key_columns: [secid, ex_date, amount, distr_type]
+  - need: "OM historical volatility"
+    table: "optionm.hvold"
+    confidence: low
+    key_columns: [secid, date, days, volatility]
+  - need: "OM <-> CRSP link"
+    table: "wrdsapps.opcrsphist"
+    confidence: medium
+    key_columns: [secid, permno, score, sdate, edate]
+
+# Fallback names tried when the primary target above does not resolve.
+schema_fallbacks:
+  "crsp.dsp500list": ["crsp.msp500list", "crsp_a_indexes.dsp500list", "crsp.dsp500list_v2"]
+  "crsp.msf": ["crsp_a_stock.msf", "crsp.msf_v2"]
+  "crsp.dsf": ["crsp_a_stock.dsf", "crsp.dsf_v2"]
+  "crsp.dsenames": ["crsp.msenames", "crsp.stocknames", "crsp_a_stock.dsenames"]
+  "crsp.dsedelist": ["crsp.dse", "crsp.msedelist", "crsp_a_stock.dsedelist"]
+  "optionm.securd": ["optionm.securd1", "optionm.secnmd", "optionm_all.securd1"]
+  "optionm.zerocd": ["optionm_all.zerocd", "wrds_optionm.zerocd"]
+  "optionm.distrd": ["optionm_all.distrd", "optionm.distrprojd"]
+  "optionm.hvold": ["optionm.hvold2019", "optionm_all.hvold", "optionm.vsurfd"]
+  "wrdsapps.opcrsphist": ["wrdsapps_link_crsp_optionm.opcrsphist", "wrdsapps.optionm_crsp_link"]
+  "optionm.opprcd2019": ["optionm_all.opprcd2019", "optionm.opprcd"]
+
+sanity:
+  # Checkpoint 0: one query that must return rows.
+  probe_ticker: "AAPL"
+  probe_permno: 14593
+  probe_date: "2019-01-02"
+  spx_secid: 108105
+  # Checkpoint 1: survivorship spot-checks.
+  tsla_permno: 93436
+  tsla_index_add_date: "2020-12-21"
+  # Checkpoint 1: the ranking must be genuinely time-varying, not a static top-150.
+  # Entry month -> tickers that must appear in that month's top-N.
+  expected_top_members:
+    "2020-03": ["AAPL", "MSFT", "AMZN"]
+    "2017-01": ["XOM", "GE"]

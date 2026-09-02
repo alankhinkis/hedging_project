@@ -1,0 +1,211 @@
+# Methodology
+
+The "why did you do it that way" document. Written incrementally at each stage gate, not at the
+end. Plan references (M#, Q#, Checkpoint N) point at `PHASE1_PLAN.md`; paper references are to
+Bakshi & Kapadia (2003, RFS 16(2), 527–566), `bakshi_kapadia_2003_rfs.pdf`.
+
+**Sections are added as stages complete.** Stages 0 and 1 are written up below.
+
+---
+
+## 0. Framing
+
+BK test delta-hedged gains on **S&P 500 index options only**, 1988:01–1995:12 — 36,237 calls and
+35,030 puts on a single underlying. Their Section 7 (p. 561) says:
+
+> "There are two natural extensions to this article. First, given that volatilities of individual
+> stocks and the market index comove highly, one could examine whether the volatility risk premium
+> is negative in individual equity options."
+
+This project is that extension. It is **not** a replication of BK, and it is not novel: the
+extension was carried out in the published literature, closest of all by **Cao & Han (2013, JFE)**,
+"Cross section of option returns and idiosyncratic stock volatility," which runs BK-style
+delta-hedged gains on individual equity options, and **Goyal & Saretto (2009, JFE)**, which trades a
+related IV−RV signal on single names. *(Both citations are from general knowledge and should be
+verified against the papers themselves before being repeated in an interview.)*
+
+How this setup differs, in one sentence: **2017–2023, a point-in-time top-150 S&P 500 universe, one
+ATM contract per stock-month held to expiry, hedged at physical volatility** — a narrower, cleaner,
+more liquidity-controlled sample than the broad cross-sections those papers use.
+
+### Target magnitudes — for bug detection, not for reproduction
+
+Different underlying, different decade. These numbers say whether the engine is broken, not
+whether the finding is right.
+
+| Measure | Paper value | Source |
+|---|---|---|
+| Mean π/S, ATM | **−0.10% to −0.11%** — the stable anchor | Table 1 |
+| Mean π/C, ATM buckets | −3.88%, −7.59% | Table 1 |
+| Fraction of ATM observations negative | 68% | Table 1 |
+
+π/S is the headline because Lemma 1 / Eq. (19) *prove* π scales with S (M14). π/C is quoted
+alongside it but never alone: the option price sits in the denominator and collapses for OTM
+options, which is why the paper's full-sample π/C (−12.18%) is three times its ATM figure.
+
+---
+
+## Stage 0 — Environment and schema reconnaissance
+
+### Why this stage exists
+
+It is not in the original brief. Every stage downstream is written against table and column names
+that were, until this stage runs, **guesses**. CRSP and OptionMetrics have both been through schema
+migrations on WRDS (the CRSP "v2" tables rename nearly every column; OptionMetrics has moved
+between `optionm` and `optionm_all`), so a plan that hard-codes `crsp.dsp500list.start` is one
+migration away from silently pulling nothing.
+
+### How it is implemented
+
+`config.yaml:schema_targets` lists each *need* with a primary guess, a confidence level, and the
+key columns that need must have. `schema_fallbacks` lists alternate names to try. Stage 0 resolves
+each need against the live server and writes two artefacts:
+
+* `docs/wrds_schema_notes.md` — human-readable: exact `schema.table`, full column list with types,
+  row count, date range, and the date verified.
+* `docs/wrds_schema_resolved.json` — machine-readable `{need → table}`.
+
+Every later stage calls `vrp.schema.table_for("Daily stock prices")` rather than naming a table.
+If Stage 0 has not run, that call logs a loud warning and falls back to the unverified guess — it
+degrades rather than crashing, but it tells you.
+
+Column names are resolved the same way, per pull: `_resolve_columns` maps a logical name
+(`"start"`) onto whichever of `start`, `mbrstartdt`, `begdt` actually exists on the resolved table.
+This is what makes the code survive a CRSP v1→v2 migration.
+
+### Checkpoint 0
+
+Encoded in `vrp.schema.checkpoint_0` and printed by the script:
+
+1. every schema target resolves to a real table;
+2. every declared key column exists on it;
+3. the OM↔CRSP link table is located **and its `score` distribution is recorded** — Checkpoint 0
+   requires knowing which score values are trustworthy, and the Stage 2a filter should be chosen
+   from that distribution rather than from folklore;
+4. the live sanity query returns rows (AAPL options on 2019-01-02), routed through the link so it
+   exercises permno → secid → option chain end to end;
+5. **Q5 is answered from the server**: the probe lists every dividend/yield-like table in `optionm`
+   and the `distr_type` code distribution. The expectation is that IvyDB provides a continuous
+   dividend *yield* for indices (`idxdvd`) and **discrete projected dividends** for single names
+   (`distrd`), which is also exactly what the paper does (M9) — but that is now checked, not
+   assumed.
+
+The probe also records `ss_flag`'s dtype and observed values and `contract_size`'s values, because
+the Stage 2b selection SQL compares against literals whose type differs by vintage (`'0'` vs `0`).
+
+### Reproducibility: the query cache
+
+Every WRDS pull goes through `cached_query`, which writes parquet under `data/raw/` keyed by
+`sha256(normalized SQL + bound parameters)`, with a JSON sidecar recording the SQL, the parameters,
+the row count and the pull timestamp. Two properties are unit-tested (`tests/test_wrds_cache.py`):
+
+* reformatting the SQL (whitespace) or reordering the parameters does **not** invalidate the cache,
+  so cosmetic edits do not trigger a re-pull;
+* changing the SQL or any parameter value **always** does.
+
+This matters because Stage 4 will be re-run many times and WRDS sessions are slow and
+rate-limited. It also means the whole build is auditable after the fact: `vrp.wrds_conn.cache_manifest()`
+lists every query that ever produced a number in the output.
+
+Credentials: `WRDS_USERNAME` from `.env`; the password lives only in `~/.pgpass` and is never read,
+logged, or committed by this code.
+
+---
+
+## Stage 1 — Point-in-time universe
+
+### The survivorship fix
+
+A name is in the universe in month *m* only if *m* falls inside one of its `dsp500list` membership
+spans. That is the entire fix, and it lives in one predicate in `members_by_month`:
+
+```python
+inside = (merged["date"] >= merged["from_date"]) & (merged["date"] <= merged["thru_date"])
+```
+
+Nothing is carried forward and nothing is back-filled from today's index composition. The
+synthetic version of this is unit-tested two ways: a name with market-cap data all year that joins
+the index mid-year must be absent before its add date, and a name that is deleted mid-sample must
+vanish after it — the TSLA and deletion spot-checks from Checkpoint 1, in miniature, with no WRDS
+connection required.
+
+### Ranking lags the entry month by one — a deviation from the plan
+
+The plan says: rank members at each month-end, take the top 150. Taken literally, positions opened
+on the **first trading day of month *m*** would be selected using **month-end *m*** market caps,
+which are not known on that day. That is look-ahead bias. Small in effect — market-cap rankings are
+persistent — but indefensible, and exactly the kind of thing a careful reader looks for.
+
+So the universe carries two columns: `rank_month` (the month-end whose data produced the ranking)
+and `entry_month = rank_month + 1` (the month whose first trading day the position is opened on).
+Stage 2b selects contracts for month *m* using `entry_month == m`. The cost is one month of
+burn-in; the December-2016 ranking governs January-2017 entries, which the burn-in window already
+covers.
+
+### Market cap from `msf`, not `dsf`
+
+Ranking happens once a month, and `msf` is roughly 20× smaller than `dsf`. `shrout` is in
+thousands, so `|prc| × shrout` is market cap in $000s — the units only matter for readability
+since the ranking is scale-invariant.
+
+A negative `prc` is CRSP's flag that the field holds a **bid-ask average** rather than a closing
+trade. The magnitude is still the right price, so `ABS(prc)` is taken and the observation is kept;
+dropping it would silently delete illiquid month-ends. (Stage 2a carries the same convention plus
+an explicit `price_is_quote_avg` flag, where it actually affects P&L.)
+
+### Multi-class names are not consolidated
+
+The S&P 500 holds slightly more than 500 permnos — GOOG/GOOGL, BRK.B, FOX/FOXA. Checkpoint 1
+therefore expects a member count of **495–510** per month; exactly 500 would be suspicious. Ranking
+is per permno and the top-150 cut is applied afterwards, so a dual-class name can occupy two slots.
+That is the honest reading of "top 150 names by market cap" when the tradable unit — the thing an
+option is written on — is the permno, not the issuer.
+
+Ties are broken by `rank(method="first")` so that ranks are always contiguous `1…N`; a
+`method="min"` tie would produce a gap and fail the checkpoint on a legitimate tie.
+
+### Checkpoint 1
+
+Encoded in `vrp.data.universe.checkpoint_1`:
+
+1. **member count per month ∈ [480, 520]** (the band is in config; 495–510 is the expected range,
+   with slack for the odd transition month). 300 or 700 means the point-in-time join is wrong.
+2. **TSLA (permno 93436) absent 30 days before its 2020-12-21 index add, present 30 days after.**
+   The single best one-line proof the point-in-time logic works.
+3. **A mid-sample deletion vanishes.** Rather than hard-coding a name — which rots — the check
+   picks the largest-cap name whose membership span ends inside the sample, straight from the
+   membership table, and asserts it has no universe rows after that month.
+4. **The ranking is genuinely time-varying**: XOM and GE in the January-2017 top-150 (both large
+   then, both much smaller by 2023); AAPL, MSFT, AMZN in March 2020. Tickers are resolved
+   point-in-time from the CRSP name history, so a renamed permno picks up the ticker it had on the
+   ranking date.
+5. **Structural integrity**: no permno twice in a month; ranks contiguous `1…N`.
+6. **Turnover**: distinct permnos across the sample must exceed 200. If it comes out near 150, the
+   universe is static and survivorship bias has been reintroduced — this is the check that catches
+   the failure mode the whole stage exists to prevent.
+
+`output/tables/universe_turnover.csv` reports entries and exits per month, and
+`universe_member_counts.csv` the raw member count, so (1) and (6) are inspectable rather than
+merely asserted.
+
+### One extra table the plan did not list
+
+`crsp.dsenames` (name history) was added to the schema targets. It is not needed for any
+computation — it exists so the Checkpoint 1 ticker assertions and every diagnostic table are
+readable by a human rather than being lists of permnos.
+
+---
+
+## Decisions already fixed (from the planning session, 2026-09-01)
+
+Recorded here so they are visibly pre-committed, before any results exist.
+
+| # | Decision | Rationale |
+|---|---|---|
+| Q1 | **Calls and puts are separate observations**, not a combined straddle. | Paper-faithful (BK's Tables 1 and 2 are separate); doubles N; gives two independent checks on the sign. A ~0.50-delta call and a ~−0.50-delta put usually sit at different strikes, so combining them is a *strangle*, not a straddle. |
+| Q2 | **BS European delta with an escrowed-dividend adjustment** as the primary hedge ratio (paper's Eq. 30); CRR American delta as a robustness column on a subsample; OptionMetrics' own binomial delta used for *contract selection*. | The paper's specification is the thing being extended, and for ~0.50-delta 30-day options with modest dividends the early-exercise premium is small. Single-name options *are* American; this is a conscious approximation, not an oversight. |
+| Q3 | **VOL^h (30-calendar-day rolling realized) built first; GARCH(1,1), refit annually, reported as the primary hedge-ratio input** to match Eq. (30); VOL^h as the robustness column. 60-day VOL^h as a stability check. | 30 days matches BK Sec. 5. Building the simple estimator first unblocks Stage 4. |
+| Q6 | **Risk-free rate from `optionm.zerocd`**, linearly interpolated in days to each option's remaining maturity, updated daily — a deliberate deviation from BK's put-call-parity rate (M10). | For 150 single names with strike-mismatched pairs, parity-implied rates are noisy and slow. The zero curve is standard practice in the single-name literature and strictly cleaner data. |
+| Q8 | **Implied-vol screen capped at 300%** (floor 1%) as primary; the paper's literal 100% cap reported as a robustness row. | BK's screen is stated as a *recording-error* filter ("to minimize the impact of recording errors," Sec. 2 p. 538). On SPX in 1988–1995, 100% and "impossible quote" coincided. On single names in March 2020 they do not: 30-day ATM IV above 100% was a real, correctly-recorded observation. Applying 100% literally would delete genuine data **asymmetrically, only on the high-vol side**, biasing the measured premium toward zero in precisely the month carrying the most information. Note this cuts *against* the hypothesis — it keeps the observations hardest to hedge well. |
+| Q10 | **Entry on the first trading day of each calendar month.** | Simpler and easier to defend than a fixed offset from monthly expiration, which correlates entry dates with the expiration cycle. |
+| Q4 | **The headline t-stat will be led by the month-level portfolio time series (effective N = 84), not the naive pooled t-stat.** Decided before any results exist. | 150 names all load on the same market volatility factor; two positions in the same month are not independent draws. A naive pooled t-stat over ~25,000 observations will produce something absurd. BK flag the weaker version of this themselves (M15). |

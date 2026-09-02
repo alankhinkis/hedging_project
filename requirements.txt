@@ -1,0 +1,26 @@
+# Pinned to the versions verified working on 2026-09-02 (Python 3.13.9, Windows).
+# Lower bounds rather than hard pins, except where a downgrade is deliberate.
+
+# Core numerics
+numpy>=2.3
+pandas>=2.2,<2.3          # wrds 3.5 constrains pandas; do not bump without re-testing
+scipy>=1.16
+statsmodels>=0.14
+
+# Data access
+wrds>=3.5                 # WRDS Python client (pulls in sqlalchemy + psycopg2-binary)
+pyarrow>=20                # parquet cache under data/raw
+
+# Volatility
+arch>=8.0                 # GARCH(1,1), Stage 3
+
+# Config / environment
+PyYAML>=6.0
+python-dotenv>=1.0
+
+# Output
+matplotlib>=3.9
+tqdm>=4.66
+
+# Tests
+pytest>=8.0

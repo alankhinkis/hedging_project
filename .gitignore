@@ -1,0 +1,45 @@
+# Data is never committed: WRDS licensing forbids redistribution, and every file under
+# data/ is reproducible from the scripts plus a WRDS login.
+# Ignore the *contents* of each data subdirectory, not the directories themselves --
+# a negation cannot re-include a file under an ignored directory, so `data/` on its own
+# would drop the .gitkeep files and the layout with them.
+data/*/*
+!data/*/.gitkeep
+
+# Credentials
+.env
+*.pgpass
+
+# Machine-local Claude Code permission state
+.claude/settings.local.json
+
+# The source paper. Copyrighted (RFS); excluded so this repo can be pushed public without
+# redistributing it. Removing it from git history later is far more painful than adding it,
+# so the default is to leave it out. Drop this line if the repo stays private.
+docs/*.pdf
+
+# Generated output
+output/tables/*
+output/figures/*
+!output/**/.gitkeep
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+build/
+dist/
+.venv/
+venv/
+
+# Notebooks
+.ipynb_checkpoints/
+
+# Parquet anywhere it escapes data/
+*.parquet
+
+# OS
+.DS_Store
+Thumbs.db
