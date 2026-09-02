@@ -13,11 +13,6 @@ data/*/*
 # Machine-local Claude Code permission state
 .claude/settings.local.json
 
-# The source paper. Copyrighted (RFS); excluded so this repo can be pushed public without
-# redistributing it. Removing it from git history later is far more painful than adding it,
-# so the default is to leave it out. Drop this line if the repo stays private.
-docs/*.pdf
-
 # Generated output
 output/tables/*
 output/figures/*
