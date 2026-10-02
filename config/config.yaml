@@ -66,7 +66,15 @@ vol:
   realized_window_days: 30
   realized_window_days_alt: 60
   trading_days_per_year: 252
-  garch_refit: "annual"         # M6: re-estimated annually on the trailing year
+  garch_refit: "annual"         # M6: re-estimated annually -- cadence kept
+  # DECIDED 2026-10-02 on evidence. M6 fits on ONE trailing year, which works for SPX but is
+  # badly under-identified for single names: on one year, 28% of fits collapsed to alpha = 0
+  # (the ARCH term switched off, leaving a constant that ignores returns). Measured
+  # degeneracy by training window: 1yr 28.0%, 2yr 15.4%, 3yr 12.2%. Two years takes most of
+  # the gain while keeping the annual re-estimation cadence M6 specifies.
+  garch_train_years: 2
+  # Fits with alpha below this are rejected as degenerate and fall back to VOL^h.
+  garch_min_alpha: 0.01
 
 rates:
   # Q6: deliberate deviation from BK's put-call-parity rate (M10).

@@ -30,6 +30,7 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+markers = ["slow: long-running simulation tests"]
 
 [tool.ruff]
 line-length = 100
