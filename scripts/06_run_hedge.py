@@ -99,6 +99,11 @@ def main() -> int:
     ap.add_argument("--vol-col", default="vol_hedge",
                     help="vol_hedge (GARCH + fallback), vol_h, vol_g, or vol_h_alt")
     ap.add_argument("--known-only-dividends", action="store_true")
+    ap.add_argument("--implied-placebo", action="store_true",
+                    help="Stage 4(c): hedge at the option's own IMPLIED vol instead of the "
+                         "physical estimate. Needs Pass B paths. Hedging at implied should "
+                         "partially hedge away the premium, so the measured loss shrinks; if "
+                         "nothing moves, the vol input is not reaching the delta.")
     ap.add_argument("--verbose", action="store_true")
     args = ap.parse_args()
     setup_logging(args.verbose)
@@ -138,6 +143,25 @@ def main() -> int:
           f"({int((selected['cp_flag'] == 'C').sum()):,} calls, "
           f"{int((selected['cp_flag'] == 'P').sum()):,} puts), vol input = {args.vol_col}")
 
+    # Stage 4(c): swap the hedge volatility for the contract's own daily implied vol. This is
+    # simultaneously a robustness column and a wiring test -- if the headline barely moves,
+    # the volatility argument is not actually reaching delta_fn.
+    iv_lookup = {}
+    if args.implied_placebo:
+        paths_file = interim / "option_paths.parquet"
+        if not paths_file.exists():
+            print(f"\n--implied-placebo needs {paths_file}; run "
+                  f"scripts/04_select_contracts.py without --skip-paths first.\n",
+                  file=sys.stderr)
+            return 2
+        paths = pd.read_parquet(paths_file, columns=["optionid", "date", "impl_volatility"])
+        paths = paths.loc[paths["impl_volatility"].notna()]
+        iv_lookup = {
+            int(o): g.set_index("date")["impl_volatility"].astype("float64").sort_index()
+            for o, g in paths.groupby("optionid")
+        }
+        print(f"implied-vol placebo: daily IV for {len(iv_lookup):,} contracts")
+
     price_lookup = build_price_lookup(prices)
     vol_lookup = build_vol_lookup(vol_panel, args.vol_col)
     rate_lookup = build_rate_lookup(curve)
@@ -160,6 +184,13 @@ def main() -> int:
                 pos, price_lookup, vol_lookup, rate_lookup, div_lookup,
                 known_only_dividends=args.known_only_dividends,
             )
+            if args.implied_placebo:
+                iv = iv_lookup.get(pos.optionid)
+                if iv is None or not len(iv):
+                    raise KeyError("no implied-vol path for this contract")
+                # Fall back to the physical estimate only where IV is missing, so the two
+                # runs stay on the same positions and the comparison is like-for-like.
+                vol = iv.reindex(vol.index).ffill().fillna(vol)
             res = delta_hedged_gain(pos, und, vol, rate)
         except Exception as exc:  # noqa: BLE001
             rows.append({**base, "pnl": np.nan, "error": f"{type(exc).__name__}: {exc}"[:120]})
@@ -173,7 +204,8 @@ def main() -> int:
     results.loc[good, "pnl_over_S"] = results.loc[good, "pnl"] / results.loc[good, "entry_S"]
     results.loc[good, "pnl_over_C"] = results.loc[good, "pnl"] / results.loc[good, "entry_price"]
 
-    out_path = cfg.data_processed / "hedge_results.parquet"
+    suffix = "_implied_placebo" if args.implied_placebo else ""
+    out_path = cfg.data_processed / f"hedge_results{suffix}.parquet"
     results.to_parquet(out_path, index=False)
     print(f"\nwrote {out_path.relative_to(cfg.root)}")
 
