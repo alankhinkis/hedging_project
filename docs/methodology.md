@@ -840,6 +840,55 @@ answer too.
 not distinguishable from zero, so there is no evidence that Black-Scholes systematically
 under-hedges here in a way that would bias π upward.
 
+### Robustness (Table 11)
+
+Each row re-runs the engine over the same positions with exactly one thing changed.
+
+| variant | N | mean π/S | median π/S | t | % losing |
+|---|---:|---:|---:|---:|---:|
+| **baseline** (mid entry, GARCH vol, BS delta, 300% cap) | 27,616 | +0.0422% | −0.1339% | +0.74 | 57.2% |
+| Q8: BK's literal 100% IV cap | 27,585 | +0.0428% | −0.1340% | +0.76 | 57.2% |
+| **Q12: enter at the ASK, not the mid** | 27,616 | **−0.0609%** | **−0.2174%** | **−1.12** | **61.2%** |
+| Q3: hedge at VOL^h instead of GARCH | 27,616 | +0.0514% | −0.1618% | +0.76 | 58.1% |
+| Q2a: BS European delta, 1,994-position subsample | 1,994 | −0.0060% | −0.1646% | −0.06 | 59.0% |
+| Q2b: CRR American delta, same subsample | 1,994 | −0.0048% | −0.1608% | −0.04 | 58.9% |
+| 4(c): hedge at implied vol (placebo) | 27,616 | +0.0528% | −0.1079% | +0.76 | 55.9% |
+
+Four things worth drawing out.
+
+**Q12 is the economically meaningful row, and it changes the sign.** Marking entry at the ask
+rather than the midpoint — the price a real buyer actually pays — moves the mean from +0.042%
+to **−0.061%** and the median from −0.134% to −0.217%, with 61.2% of positions losing. This is
+BK's M18 economic-significance question answered directly rather than through a spread ratio:
+**the bid-ask spread is comparable to the premium itself.** The premium is not large enough to
+survive crossing the spread as a buyer, which is also the honest answer to why it is not
+arbitraged away in single names. It is still not statistically significant (t = −1.12), so the
+correct statement is "negative at the ask, but not reliably so", not "a profitable short".
+
+**Q8 turned out to be immaterial, and the pre-commitment was still right.** The implied-vol cap
+decision was argued at length before any result existed: BK's literal 100% versus a 300% cap
+chosen to match their stated *intent* (a recording-error filter). In the event it moves 31
+positions out of 27,616 and the mean by 0.0006 percentage points. The reasoning was sound and
+the conclusion does not depend on it — which is exactly what a pre-committed decision should
+look like in retrospect. The alternative, deciding after seeing both, would have been
+indefensible for the same effort.
+
+**Q2 bounds the American-option approximation, and it is negligible.** Single-name options are
+American; the hedge uses a European delta (paper-faithful, Eq. 30). Running the CRR American
+delta on a matched subsample moves the mean by 0.0012 and the median by 0.0038 percentage
+points. At ~0.50 delta and ~30 days with modest dividends the early-exercise premium is small,
+as predicted — now measured rather than asserted. This is the one approximation the SPX anchor
+could not test, since SPX options are European.
+
+**The result is robust to the volatility input.** Hedging at VOL^h rather than the GARCH-led
+series leaves the conclusion unchanged (median −0.162% against −0.134%), so nothing here turns
+on the Stage 3 GARCH work surviving its degeneracy problems.
+
+Note that the Q2 subsample rows have a *negative* mean (−0.006%) where the full sample is
+positive (+0.042%). That is not an inconsistency: a 2,000-position random draw misses the
+handful of extreme observations that drive the full-sample mean, which is one more
+demonstration of how tail-dependent that mean is.
+
 ### Checkpoint 5 was restructured, and why that is not goalpost-moving
 
 As first written, Checkpoint 5 gated on conditions like "the mean is negative" and "2018 and

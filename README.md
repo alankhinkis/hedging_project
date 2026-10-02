@@ -61,6 +61,12 @@ Frequent small theta bleed, punctuated by rare large gains when an underlying mo
 The positive mean is entirely tail-driven -- trimming 1% of each tail erases it, while the
 median does not move.
 
+**Entering at the ask flips the sign.** Marking entry at the price a buyer actually pays,
+rather than the midpoint, moves the mean to **-0.061%** and the median to **-0.217%**, with
+61.2% of positions losing (t = -1.12). The bid-ask spread is comparable to the premium itself,
+which is both BK's economic-significance test answered directly and the honest explanation for
+why the premium is not arbitraged away in single names.
+
 Two things worth noting:
 
 - **The naive pooled t-stat is +5.49**, 7.4x the honest figure, and it points the *wrong way*:
@@ -107,6 +113,7 @@ python scripts/05_build_vol.py         # VOL^h and VOL^g panel
 python scripts/06_run_hedge.py         # the delta-hedging engine
 python scripts/07_analysis.py          # all result tables
 python scripts/08_spx_anchor.py        # Stage 4.5: the engine on SPX
+python scripts/09_robustness.py        # Q2/Q3/Q8/Q12 + the implied-vol placebo
 ```
 
 Every WRDS query is cached to parquet under `data/raw/`, keyed by a hash of the SQL and its bound
