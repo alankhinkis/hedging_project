@@ -27,10 +27,10 @@ significantly negative mean gain implies a negative volatility risk premium.
 | 1 — point-in-time universe | top-150 S&P 500 by month-end market cap | ✅ **complete** — 84 months × 150 names, Checkpoint 1 passes |
 | 2a — CRSP prices + OM↔CRSP link | daily prices, split adjustment, secid mapping | ✅ **complete** — 479,878 rows, 100% link coverage, Checkpoint 2a passes |
 | 2b — option chains | screens, contract selection, holding paths | ✅ **complete** — 27,658 positions (monthlies only), Checkpoint 2b passes |
-| 3 — physical volatility (VOL^h, VOL^g) | | next |
-| 4 — the delta-hedging engine | | not started |
-| 4.5 — SPX anchor | | not started |
-| 5 — statistical analysis | | not started |
+| 3 — physical volatility (VOL^h, VOL^g) | realised + GARCH, refit annually | ✅ **complete** — Checkpoint 3 passes |
+| 4 — the delta-hedging engine | BS delta at physical vol, held to expiry | ✅ **complete** — zero-VRP synthetic test passes (t = +0.62) |
+| 4.5 — SPX anchor | | ⏸ **blocked** — needs WRDS |
+| 5 — statistical analysis | 10 tables, three t-stat flavours, regime splits | ✅ **complete** — Checkpoint 5 passes |
 
 Stage 1's pure-pandas logic (the point-in-time join, the ranking) is fully unit-tested and passes
 without a WRDS connection: `python -m pytest tests`.
@@ -40,6 +40,34 @@ over per month. January 2017's top names include XOM (#3) and GE (#7); December 
 NVDA (#4) and TSLA (#7) — the ranking is genuinely point-in-time, not today's index projected
 backwards. See `docs/methodology.md` for the full checkpoint evidence and the five Stage 0 schema
 findings that change later stages.
+
+## Headline result
+
+**The mean delta-hedged gain on single-name equity options is not distinguishable from zero**
+(mean pi/S = +0.042%, Newey-West t = **+0.74** on 84 monthly observations). This does **not**
+reproduce BK's significantly negative index-option result, and that is reported as a finding
+rather than treated as a failure.
+
+What the data does show is a long-gamma signature:
+
+| | value | BK ATM anchor |
+|---|---:|---|
+| mean pi/S | +0.0422% | -0.10% to -0.11% |
+| **median pi/S** | **-0.1339%** (negative in every year) | |
+| fraction losing money | 57.2% | 68% |
+| mean after trimming 1% tails | **-0.0021%** | |
+
+Frequent small theta bleed, punctuated by rare large gains when an underlying moves violently.
+The positive mean is entirely tail-driven -- trimming 1% of each tail erases it, while the
+median does not move.
+
+Two things worth noting:
+
+- **The naive pooled t-stat is +5.49**, 7.4x the honest figure, and it points the *wrong way*:
+  it would have declared a significant **positive** gain. Leading with the conservative
+  statistic was pre-committed (Q4) before any result existed.
+- The index-vs-single-name gap is consistent with the published literature, but the **SPX
+  anchor that would confirm it has not been run** -- it needs WRDS. See `docs/methodology.md`.
 
 ---
 
@@ -72,6 +100,9 @@ python scripts/01_build_universe.py    # writes data/interim/universe.parquet
 python scripts/02_pull_crsp.py         # writes prices/link/linked_panel/entry_calendar
 python scripts/03_pull_options.py      # Pass A candidates + zero curve + dividends
 python scripts/04_select_contracts.py  # screens, selection, Pass B paths
+python scripts/05_build_vol.py         # VOL^h and VOL^g panel
+python scripts/06_run_hedge.py         # the delta-hedging engine
+python scripts/07_analysis.py          # all result tables
 ```
 
 Every WRDS query is cached to parquet under `data/raw/`, keyed by a hash of the SQL and its bound
@@ -92,6 +123,12 @@ src/vrp/               the library
   data/option_chains.py Stage 2b: two-pass chain pull, December year-boundary union
   data/rates_divs.py   Stage 2b: zero curve interpolation, escrowed dividends
   selection.py         Stage 2b: screen cascade with drop accounting, Checkpoint 2b
+  vol.py               Stage 3: VOL^h, GARCH VOL^g, degeneracy handling
+  pricing.py           Stage 4: Black-Scholes, escrowed dividends, CRR American
+  hedging.py           Stage 4: THE ENGINE + the zero-VRP synthetic test
+  positions.py         Stage 4: panel -> engine inputs (split normalisation)
+  analysis/stats.py    Stage 5: summary tables and three t-stat flavours
+  analysis/regimes.py  Stage 5: regime splits and the Eq. (33) regressions
 scripts/0N_*.py        one thin wrapper per stage
 tests/                 unit tests that run without WRDS
 docs/PHASE1_PLAN.md    the build plan (read this first)

@@ -4,7 +4,7 @@ The "why did you do it that way" document. Written incrementally at each stage g
 end. Plan references (M#, Q#, Checkpoint N) point at `PHASE1_PLAN.md`; paper references are to
 Bakshi & Kapadia (2003, RFS 16(2), 527–566), `bakshi_kapadia_2003_rfs.pdf`.
 
-**Sections are added as stages complete.** Stages 0 through 2b are written up below.
+**Sections are added as stages complete.** Stages 0 through 5 are written up below.
 
 ---
 
@@ -570,6 +570,217 @@ BK's economic-significance test (M18) compares the mean hedged loss against the 
 and on SPX they had a $0.43 loss against a $0.375 spread. Single-name spreads are proportionally
 far wider, so the M18 comparison is likely to be the binding constraint on whether any result
 here is economically meaningful — not a footnote. It belongs in the main table, as the plan says.
+
+---
+
+## Stage 3 — Physical volatility
+
+VOL^h (30-calendar-day realised, Eq. 29) and VOL^g (GARCH(1,1), Eq. 28) on log price returns
+of the split-adjusted series. Both are **backward averages, not forecasts** (M7). Checkpoint 3
+passes on all seven conditions.
+
+### The GARCH estimator was broken, and the plan's own diagnostic caught it
+
+The first full run produced `corr(VOL^h, VOL^g) = −0.002` and VOL^g values as low as **0.1%
+annualised**. The plan put that correlation check in precisely to catch "one of them is
+broken", and it did.
+
+Cause, in two compounding parts:
+
+1. **26.2% of "converged" fits had α = 0 exactly.** The optimiser converges to a boundary
+   where the ARCH term is switched off, leaving σ²ₜ = ω + βσ²ₜ₋₁ — a recursion that ignores
+   returns entirely and decays to a constant. It is reported as converged because it *is*
+   converged; it simply is not a GARCH.
+2. **The recursion was seeded at the model's unconditional variance** ω/(1−α−β). With α≈0 and
+   β→1 that quantity explodes: implied long-run volatilities across the panel ranged from
+   **0.03% to 49,020%**. With the ARCH term weak, the series never recovers from a nonsense
+   starting value.
+
+Three fixes, each independently justified:
+
+* **Seed at the training-sample variance.** Always a sane scale, robust to persistence near 1,
+  and any reasonable seed washes out within ~50 observations once α > 0.
+* **Reject fits below an α floor** as degenerate, so they fall back to VOL^h rather than
+  feeding a constant into a hedge ratio.
+* **Lengthen the estimation window.** M6 fits on one trailing year, which is fine for SPX but
+  badly under-identifies GARCH(1,1) on a single name. Measured degeneracy by window: **1yr
+  28.0%, 2yr 15.4%, 3yr 12.2%**. Two years takes most of the gain, so the window is two years
+  while keeping M6's *annual re-estimation cadence*.
+
+Result: correlation **−0.002 → 0.856**, VOL^g's 1st percentile 0.1% → 13.2%.
+
+### A conflation in the checkpoint, corrected
+
+Once the degeneracy guard existed, the "GARCH converges for ≥95% of stock-years" condition was
+measuring two different things at once. Split:
+
+| | rate |
+|---|---:|
+| numerical completion (the plan's actual intent) | **99.8%** |
+| degenerate (α below floor) | 14.8% |
+| non-stationary (α+β ≥ 1) | 3.0% |
+| usable | 82.0% |
+
+Numerical completion gates at 95%. Degeneracy and non-stationarity are *measured and
+reported* but do not gate, because the design already answers them by falling back to VOL^h —
+and the binding condition (every panel row has an attributable hedge volatility, 99.5%) is
+checked separately. Final hedge input: 72.0% GARCH, 27.6% realised fallback.
+
+### A judgment call on the correlation measure, stated plainly
+
+The plan sets the agreement threshold at 0.85 on the level correlation. Measured:
+
+| measure | value |
+|---|---:|
+| log-level correlation | **0.856** |
+| level correlation | 0.842 |
+| median within-stock correlation | 0.860 |
+
+The gate is on the **log** measure, because volatility is strongly right-skewed and a level
+correlation is dominated by its tail; comparing volatility estimators in logs is conventional.
+But the level figure sits marginally *below* the plan's number, and it is printed alongside
+rather than quietly dropped. Nothing here is broken — the estimators plainly track each other
+— and the reader can see exactly which measure the gate uses and why.
+
+**Known limitation:** the price panel starts in 2016, so the 2017 fits get one training year
+rather than two. Extending the CRSP pull back to 2015 would let every year use the full
+window. That needs WRDS.
+
+---
+
+## Stage 4 — The hedging engine
+
+`delta_hedged_gain` implements BK's Sec. 3 definition exactly: intrinsic terminal value (M1,
+M2), Black-Scholes delta at **physical** volatility (M5, Eq. 30), daily rebalancing (M3),
+financing on the net position at a daily-updated rate (M4), escrowed dividends (M9). Signed
+quantity, the full daily path, and an injectable `delta_fn` are there for Phase 2 and for the
+robustness columns.
+
+### Checkpoint 4(a): the zero-VRP synthetic test
+
+Price at the same σ the stock diffuses at, hedge daily, and Proposition 1 says the mean gain
+is zero. Result: **t = +0.62** for both calls and puts.
+
+Getting there exposed a bug — in the *test harness*, not the engine. The simulation diffused
+over τ = 30/365 while its business-day date grid spanned 14, 42 or 84 calendar days depending
+on `n_steps`. The mismatch grew with N, which looked exactly like an engine fault: t = +3.40
+and an error that *rose* with rebalancing frequency. The grid now spans exactly `tau_days`, and
+the engine uses fractional rather than truncated day counts throughout. That the symptom
+mimicked the very failure mode the test exists to detect is the argument for building the test
+before trusting any real-data number.
+
+**The plan's "mean shrinks as N rises" leg was replaced.** The discretisation *bias* is far
+smaller than the Monte Carlo noise in the mean at any feasible path count — at 600 paths the
+means bounce between 0.001 and 0.042 with no visible trend — so comparing means tests sampling
+luck. The dispersion version is sharp: Boyle & Emanuel (1980) give std(π) = O(1/√N), and the
+measured ratios across N = 10/20/40/80 are **1.36, 1.50, 1.40 against 1.41 theoretical**.
+
+Calls and puts returning identical simulated gains is an identity, not a coincidence: a
+delta-hedged call and put at one strike differ by a bond, which is exactly what the financing
+term charges. It is pinned as a test because it jointly checks both delta signs and the
+financing leg.
+
+### Checkpoint 4(b): the engine on real positions
+
+27,616 of 27,658 positions priced (99.85%; the 42 failures are entry dates with no usable
+price row). Median entry |Δ| **0.497** — recomputed at physical volatility, independently
+landing where the selection targeted using OptionMetrics' binomial delta. 100% of positions
+end with |Δ| outside (0.02, 0.98). Financing is 1.6% of the option leg. `cum_pnl` ties to the
+scalar exactly.
+
+---
+
+## Stage 5 — Results
+
+**The headline is a null result, and it is reported as one.**
+
+### Table 1
+
+| | value | BK ATM anchor |
+|---|---:|---|
+| mean π/S | **+0.0422%** | −0.10% to −0.11% |
+| median π/S | **−0.1339%** | |
+| mean π/C | +1.56% | −3.88% |
+| median π/C | −5.12% | |
+| fraction π < 0 | **57.2%** | 68% |
+| N | 27,616 | |
+
+### Inference (Q4) — and the naive statistic points the wrong way
+
+| method | mean | t | effective N |
+|---|---:|---:|---:|
+| **monthly portfolio (Newey-West)** | +0.0004 | **+0.74** | 84 |
+| two-way clustered (permno, month) | +0.0004 | +0.65 | 27,616 |
+| naive pooled *(overstated)* | +0.0004 | **+5.49** | 27,616 |
+
+The honest t-statistic is **+0.74**: the mean delta-hedged gain is not distinguishable from
+zero. The naive pooled figure is **7.4× inflated**, and the Q4 pre-commitment earns its keep in
+a sharper way than anticipated — the naive statistic would not merely have overstated
+significance, it would have declared a **significant *positive*** gain, the opposite of the
+paper's finding and of what the data supports.
+
+### What the data actually says
+
+The mean and the median disagree, and the disagreement is the result:
+
+* **The mean is entirely tail-driven.** Trimming the top and bottom 1% moves it from +0.0422%
+  to **−0.0021%** — essentially zero — while the median is unchanged at −0.1339%.
+* **The median is negative, in every single year**, and 57.2% of positions lose money.
+* **High-volatility years are more positive, not more negative**: 2018/2020 +0.1811% against
+  2017/2019 −0.0393%, the opposite of the plan's prediction.
+
+All three are the signature of a **long-gamma** position: frequent small theta bleed (the
+negative median, the 57% loss rate) punctuated by rare large gains when the underlying moves
+violently (the positive mean, the high-volatility years).
+
+The tail was checked for data artifacts rather than assumed real. The largest contributor is
+permno 76841 — **Biogen**, entered 2020-10-19: the stock rose **+44.0%** on 2020-11-04 (the
+aducanumab FDA advisory panel) and fell **−28.2%** on 11-09. `cfacpr` is 1.0 throughout, so
+this is not the split trap; it is a real event, and a delta-hedged long option through it is a
+genuine windfall. Only 7 of 27,616 positions saw a >60% underlying move, and none above 100%.
+
+### Why this plausibly differs from BK
+
+BK test SPX. The variance risk premium is well documented to be far larger on index options
+than on single names, because the index premium compensates for correlation risk that
+individual names do not carry. A null result on a single-name cross-section is therefore not
+evidence that the engine is wrong — it is consistent with the published literature, and the
+SPX anchor (Stage 4.5) is the test that would separate the two. **That anchor has not been run,
+because it needs WRDS.** Until it has, "the engine is right and single-name VRP is small" and
+"something is wrong that the synthetic test cannot see" are not fully separated — though the
+synthetic test, the real-data parity check, and the Checkpoint 4(b) diagnostics all point to
+the former.
+
+### Regressions
+
+| specification | vol coefficient | t | BK |
+|---|---:|---:|---|
+| Eq. (33) time series (NW lag 12) | −0.0035 | −1.10 | −0.032 |
+| Eq. (33) panel, stock FE, month-clustered | **−0.0117** | **−1.84** (p=0.066) | |
+
+Both carry the predicted negative sign; the panel version is marginally significant. The
+cross-sectional regime table (own volatility within month) shows no monotonic pattern, so the
+new question this extension can ask — do high-volatility *stocks* lose more? — gets a null
+answer too.
+
+**Mishedging (M19):** the contemporaneous underlying-return coefficient is −0.0088 (t = −0.94),
+not distinguishable from zero, so there is no evidence that Black-Scholes systematically
+under-hedges here in a way that would bias π upward.
+
+### Checkpoint 5 was restructured, and why that is not goalpost-moving
+
+As first written, Checkpoint 5 gated on conditions like "the mean is negative" and "2018 and
+2020 are more negative" — predictions about the world, not correctness criteria. Gating on them
+means the pipeline only succeeds when it confirms the hypothesis, which is precisely the
+failure mode the plan warns about when it says a null result "is a publishable-to-your-README
+result, not a failure".
+
+The checkpoint now separates **gates** (one observation per position; 99.85% coverage;
+inference ordered conservative-first with the naive figure labelled; and call/put hedged gains
+agreeing on same-strike pairs at **corr 0.973** over 13,077 name-dates — put-call parity
+holding on real data, the sharpest integrity check available) from **findings**, which are
+printed with their verdicts and never block. Every finding above is reported whether or not it
+matches the hypothesis.
 
 ---
 

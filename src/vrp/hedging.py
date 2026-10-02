@@ -174,7 +174,11 @@ def delta_hedged_gain(
         "d_financing": np.concatenate([d_financing, [np.nan]]),
         "cum_hedge_pnl": cum,
     })
-    # cum_pnl on the last row must equal the scalar pnl -- asserted in Checkpoint 4(b).
+    # cum_pnl ties to the scalar on the LAST row (asserted in Checkpoint 4(b)), but the
+    # intermediate rows are not a mark-to-market: they carry the option at zero, so each one
+    # reads "cash paid for the option plus hedge P&L so far". The jump on the final row is
+    # the payoff arriving, not an error. A true daily mark needs the Pass B option quotes,
+    # which Phase 2 will join onto this path.
     daily["cum_pnl"] = position.quantity * (cum + np.where(
         daily["date"] == dates[-1], option_pnl, -float(position.entry_price)
     ))
