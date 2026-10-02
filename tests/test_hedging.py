@@ -235,3 +235,23 @@ def test_run_positions_adds_the_papers_three_normalisations():
     entry_S = float(path[0])          # the path is already shocked at t=0
     assert res["pnl_over_S"].iloc[0] == pytest.approx(res["pnl"].iloc[0] / entry_S)
     assert 1 in paths and len(paths[1]) == 31
+
+
+def test_continuous_yield_lowers_the_call_delta():
+    """An index carries a continuous yield rather than discrete dividends; the delta must
+    pick up its e^{-q*tau} factor. Escrowing a yield instead would get the level right and
+    the delta slightly wrong, which is a hedge-ratio error on every rebalance."""
+    pos, und, vol, rate = flat_setup([100.0] * 31, cp="C")
+    base = delta_hedged_gain(pos, und, vol, rate).daily["delta"].iloc[0]
+    with_q = delta_hedged_gain(
+        pos, und, vol, rate, yield_path=pd.Series(0.05, index=rate.index)
+    ).daily["delta"].iloc[0]
+    assert with_q < base
+
+
+def test_zero_yield_path_matches_no_yield_path():
+    pos, und, vol, rate = flat_setup([100.0] * 31)
+    a = delta_hedged_gain(pos, und, vol, rate).pnl
+    b = delta_hedged_gain(pos, und, vol, rate,
+                          yield_path=pd.Series(0.0, index=rate.index)).pnl
+    assert a == pytest.approx(b)

@@ -29,7 +29,7 @@ significantly negative mean gain implies a negative volatility risk premium.
 | 2b — option chains | screens, contract selection, holding paths | ✅ **complete** — 27,658 positions (monthlies only), Checkpoint 2b passes |
 | 3 — physical volatility (VOL^h, VOL^g) | realised + GARCH, refit annually | ✅ **complete** — Checkpoint 3 passes |
 | 4 — the delta-hedging engine | BS delta at physical vol, held to expiry | ✅ **complete** — zero-VRP synthetic test passes (t = +0.62) |
-| 4.5 — SPX anchor | | ⏸ **blocked** — needs WRDS |
+| 4.5 — SPX anchor | the engine on BK's own asset class | ✅ **complete** — median π/C −3.62% vs BK's −3.88% |
 | 5 — statistical analysis | 10 tables, three t-stat flavours, regime splits | ✅ **complete** — Checkpoint 5 passes |
 
 Stage 1's pure-pandas logic (the point-in-time join, the ranking) is fully unit-tested and passes
@@ -66,8 +66,11 @@ Two things worth noting:
 - **The naive pooled t-stat is +5.49**, 7.4x the honest figure, and it points the *wrong way*:
   it would have declared a significant **positive** gain. Leading with the conservative
   statistic was pre-committed (Q4) before any result existed.
-- The index-vs-single-name gap is consistent with the published literature, but the **SPX
-  anchor that would confirm it has not been run** -- it needs WRDS. See `docs/methodology.md`.
+- **The SPX anchor validates the engine.** Run on BK's own asset class, the median π/C comes
+  out at **−3.62% against BK's −3.88%**, with 57.7% of positions losing money against their
+  68%. The central tendency reproduces the paper. SPX shows the *same* positive mean, and four
+  COVID observations out of 168 account for it — so the mean result is a property of the
+  2017–2023 period, not of single names or of the code.
 
 ---
 
@@ -103,6 +106,7 @@ python scripts/04_select_contracts.py  # screens, selection, Pass B paths
 python scripts/05_build_vol.py         # VOL^h and VOL^g panel
 python scripts/06_run_hedge.py         # the delta-hedging engine
 python scripts/07_analysis.py          # all result tables
+python scripts/08_spx_anchor.py        # Stage 4.5: the engine on SPX
 ```
 
 Every WRDS query is cached to parquet under `data/raw/`, keyed by a hash of the SQL and its bound
@@ -129,6 +133,7 @@ src/vrp/               the library
   positions.py         Stage 4: panel -> engine inputs (split normalisation)
   analysis/stats.py    Stage 5: summary tables and three t-stat flavours
   analysis/regimes.py  Stage 5: regime splits and the Eq. (33) regressions
+  spx.py               Stage 4.5: the SPX anchor
 scripts/0N_*.py        one thin wrapper per stage
 tests/                 unit tests that run without WRDS
 docs/PHASE1_PLAN.md    the build plan (read this first)

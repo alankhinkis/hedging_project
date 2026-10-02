@@ -142,7 +142,11 @@ def clustered_tstat(
     df["entry_month"] = pd.PeriodIndex(df["entry_date"], freq="M").astype(str)
     y = df[value].to_numpy(dtype="float64")
     x = np.ones((len(y), 1))
-    g_permno = pd.factorize(df["permno"])[0]
+    # The SPX anchor has a single underlying and no permno column at all, so the "cluster by
+    # name" dimension collapses to one group -- which is correct, not an error: BK's own
+    # setting is exactly one underlying.
+    g_permno = (pd.factorize(df["permno"])[0] if "permno" in df.columns
+                else np.zeros(len(df), dtype="int64"))
     g_month = pd.factorize(df["entry_month"])[0]
     n_p, n_m = len(set(g_permno)), len(set(g_month))
 

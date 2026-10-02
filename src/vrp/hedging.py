@@ -76,6 +76,7 @@ def delta_hedged_gain(
     delta_fn: Callable = bs_delta,
     terminal: str = "intrinsic",       # "intrinsic" (paper) | "mid" (mark-to-market)
     option_marks: pd.Series | None = None,   # date -> option mid, only for terminal="mid"
+    yield_path: pd.Series | None = None,     # date -> continuous dividend yield q
 ) -> HedgeResult:
     """Delta-hedged gain for one position, rebalanced daily at the close (M3).
 
@@ -88,6 +89,12 @@ def delta_hedged_gain(
     A missing stock day inside the hold (halt, suspension) carries the previous delta forward
     rather than rebalancing, and is counted in `diagnostics` -- dropping the day would
     silently shorten the position, and interpolating would invent a price that never traded.
+
+    Dividends come in two mutually exclusive forms. Single names use `underlying["pv_divs"]`,
+    the escrowed treatment BK specify (M9), because IvyDB gives discrete dividends for
+    equities. An index has a continuous yield instead, so `yield_path` supplies q directly and
+    the delta picks up its e^{-q*tau} factor -- escrowing a continuous yield would get the
+    level right and the delta slightly wrong.
     """
     px = underlying.loc[
         (underlying["date"] >= position.entry_date) & (underlying["date"] <= position.expiry)
@@ -124,6 +131,9 @@ def delta_hedged_gain(
     # Escrowed dividends (M9): the European formula prices the ex-dividend diffusion, so the
     # PV of dividends falling inside the remaining life is removed from the spot first.
     S_escrow = escrowed_spot(S, pv_divs)
+    q = (yield_path.reindex(dates).ffill().to_numpy(dtype="float64")
+         if yield_path is not None else np.zeros(len(px)))
+    q = np.nan_to_num(q, nan=0.0)
 
     n = len(px)
     delta = np.full(n, np.nan)
@@ -131,7 +141,7 @@ def delta_hedged_gain(
         if not np.isfinite(S_escrow[i]) or not np.isfinite(sigma[i]) or not np.isfinite(r[i]):
             continue
         delta[i] = float(np.asarray(
-            delta_fn(S_escrow[i], K, tau[i], sigma[i], r[i], 0.0, position.cp_flag)
+            delta_fn(S_escrow[i], K, tau[i], sigma[i], r[i], q[i], position.cp_flag)
         ))
     # A day we could not price keeps yesterday's hedge rather than going unhedged.
     delta = pd.Series(delta).ffill().to_numpy()
@@ -169,6 +179,7 @@ def delta_hedged_gain(
         "tau": tau,
         "sigma_hat": sigma,
         "r": r,
+        "q": q,
         "delta": delta,
         "d_hedge_pnl": np.concatenate([d_hedge, [np.nan]]),
         "d_financing": np.concatenate([d_financing, [np.nan]]),
