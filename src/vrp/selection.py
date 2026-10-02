@@ -330,8 +330,17 @@ def checkpoint_2b(
     spot: pd.DataFrame,
     curve: pd.DataFrame,
     cfg: Config | None = None,
+    *,
+    paths_pending: bool = False,
 ) -> list[tuple[str, bool, str]]:
-    """Checkpoint 2b from PHASE1_PLAN.md, as an explicit pass/fail list."""
+    """Checkpoint 2b from PHASE1_PLAN.md, as an explicit pass/fail list.
+
+    `paths_pending` marks Pass B as deliberately not run (skipped, or WRDS unreachable). The
+    two path-dependent conditions are then OMITTED rather than reported either way: calling
+    them passed would assert something unverified, and calling them failed would gate the
+    build on a step the headline P&L does not need (M1 -- the paper's P&L uses the option
+    price only at entry). The caller is responsible for saying they were deferred.
+    """
     cfg = cfg or load_config()
     sel = cfg["selection"]
     results: list[tuple[str, bool, str]] = []
@@ -392,9 +401,9 @@ def checkpoint_2b(
         ))
 
     # --- 6. Pass B path length ---------------------------------------------
-    if not len(paths):
+    if not paths_pending and not len(paths):
         results.append(("Pass B path length ~21 trading days per position", False, "no paths pulled"))
-    else:
+    elif len(paths):
         per = paths.groupby("optionid").size()
         med_len = float(per.median())
         expected = 21.0
@@ -414,6 +423,8 @@ def checkpoint_2b(
         ))
 
     # --- 8. the December year-boundary union actually worked ---------------
+    if paths_pending:
+        return results
     dec = selected.loc[selected["entry_date"].dt.month == 12]
     if not len(dec) or not len(paths):
         results.append(("December cohorts span the year boundary (the UNION trap)", False,

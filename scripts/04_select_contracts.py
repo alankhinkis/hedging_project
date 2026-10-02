@@ -121,6 +121,25 @@ def main() -> int:
     print(cov_year[["group", "stock_months", "with_call", "with_put", "coverage"]]
           .to_string(index=False))
 
+    # --- persist the selection BEFORE the network step ---------------------
+    # Pass B is a remote call and can fail (WRDS session caps, expired credentials). Writing
+    # the selection afterwards meant a Pass B failure silently discarded everything computed
+    # above and left the PREVIOUS run's parquet in place -- a stale file that later stages
+    # would happily read. Selection is deterministic from cached inputs, so it is saved as
+    # soon as it exists; only the paths file waits on the network.
+    selected.to_parquet(interim / "selected_contracts.parquet", index=False)
+    selected_lit.to_parquet(interim / "selected_contracts_iv100.parquet", index=False)
+
+    screen_log.to_csv(cfg.output_tables / "screen_cascade.csv", index=False)
+    pos_report.to_csv(cfg.output_tables / "position_exclusions.csv", index=False)
+    screen_log_lit.to_csv(cfg.output_tables / "screen_cascade_iv100.csv", index=False)
+    cov_year.to_csv(cfg.output_tables / "coverage_by_year.csv", index=False)
+    coverage_report(spec, selected, by="month").to_csv(
+        cfg.output_tables / "coverage_by_month.csv", index=False)
+    if spec["entry_month"].nunique() > 1:
+        coverage_report(spec, selected, by="cap_quintile").to_csv(
+            cfg.output_tables / "coverage_by_cap_quintile.csv", index=False)
+
     # --- Pass B ------------------------------------------------------------
     # A paths file from a previous run describes a DIFFERENT set of contracts. Leaving it in
     # place after a selection change would let Stage 4 silently mark positions to quotes that
@@ -137,40 +156,34 @@ def main() -> int:
                   f"(does not cover the current selection) -> {stale.name}")
 
     paths = pd.DataFrame()
+    paths_pending = args.skip_paths
     if not args.skip_paths and len(selected):
         try:
             conn = get_connection(cfg)
+            paths = fetch_paths(selected, cfg, conn=conn, force=args.force)
+            print(f"\nPass B paths: {len(paths):,} rows over "
+                  f"{paths['optionid'].nunique():,} contracts")
+            paths.to_parquet(interim / "option_paths.parquet", index=False)
         except WRDSUnavailable as exc:
-            print(f"\nWRDS connection failed.\n\n{exc}\n", file=sys.stderr)
-            return 2
-        paths = fetch_paths(selected, cfg, conn=conn, force=args.force)
-        print(f"\nPass B paths: {len(paths):,} rows over "
-              f"{paths['optionid'].nunique():,} contracts")
-
-    # --- persist -----------------------------------------------------------
-    selected.to_parquet(interim / "selected_contracts.parquet", index=False)
-    selected_lit.to_parquet(interim / "selected_contracts_iv100.parquet", index=False)
-    if len(paths):
-        paths.to_parquet(interim / "option_paths.parquet", index=False)
-
-    screen_log.to_csv(cfg.output_tables / "screen_cascade.csv", index=False)
-    pos_report.to_csv(cfg.output_tables / "position_exclusions.csv", index=False)
-    screen_log_lit.to_csv(cfg.output_tables / "screen_cascade_iv100.csv", index=False)
-    cov_year.to_csv(cfg.output_tables / "coverage_by_year.csv", index=False)
-    coverage_report(spec, selected, by="month").to_csv(
-        cfg.output_tables / "coverage_by_month.csv", index=False)
-    if spec["entry_month"].nunique() > 1:
-        coverage_report(spec, selected, by="cap_quintile").to_csv(
-            cfg.output_tables / "coverage_by_cap_quintile.csv", index=False)
+            # Not fatal: the selection is already on disk, and the paper's P&L (M1) needs the
+            # option price only at entry -- the terminal value is intrinsic and the deltas are
+            # ours. Pass B feeds the implied-vol placebo and Phase 2's mark-to-market, so the
+            # headline result is not blocked by a WRDS outage.
+            print(f"\nWRDS unavailable, so Pass B is deferred.\n\n{exc}\n", file=sys.stderr)
+            paths_pending = True
 
     if not len(selected):
         print("\nno contracts selected -- cannot run Checkpoint 2b.", file=sys.stderr)
         return 1
 
+    results = checkpoint_2b(spec, screened, selected, paths, spot, curve, cfg,
+                            paths_pending=paths_pending)
     ok = print_checkpoint(
-        "CHECKPOINT 2b -- option chains, screens and contract selection",
-        checkpoint_2b(spec, screened, selected, paths, spot, curve, cfg),
+        "CHECKPOINT 2b -- option chains, screens and contract selection", results
     )
+    if paths_pending:
+        print("  NOTE: 2 path-dependent conditions deferred -- Pass B has not run.\n"
+              "        Re-run without --skip-paths once WRDS is reachable.")
     return 0 if ok else 1
 
 

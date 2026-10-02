@@ -358,3 +358,37 @@ def test_position_filters_keep_a_delisting_outside_the_hold():
                            "has_price": True})
     on_entry = pd.DataFrame({"permno": [101], "dlstdt": pd.to_datetime(["2019-01-22"])})
     assert len(apply_position_filters(sel, prices, on_entry, linked)[0]) == 1
+
+
+def test_checkpoint_2b_defers_path_conditions_when_pass_b_has_not_run(cfg):
+    """A deferred check must be OMITTED, never reported as passed or failed.
+
+    Pass B is a remote call that can fail. Calling its conditions passed would assert
+    something unverified; calling them failed would gate the build on a step the headline
+    P&L does not need (M1). The non-path conditions must still be evaluated.
+    """
+    from vrp.selection import checkpoint_2b
+
+    sel = select_contracts(chain([{"optionid": 1}]), cfg)
+    sel["permno"] = 101
+    spec = pd.DataFrame({
+        "entry_month": pd.PeriodIndex(["2019-03"], freq="M"),
+        "entry_date": [pd.Timestamp("2019-03-01")],
+        "secid": [1], "rank": [1], "mktcap_k": [100.0], "has_secid": [True],
+    })
+    spot = pd.DataFrame({"secid": [1], "date": [pd.Timestamp("2019-03-01")], "S": [100.0]})
+    curve = pd.DataFrame({"date": [pd.Timestamp("2019-03-01")], "days": [30.0], "r": [0.02]})
+
+    deferred = checkpoint_2b(spec, chain([{"optionid": 1}]), sel, pd.DataFrame(),
+                             spot, curve, cfg, paths_pending=True)
+    names = [n for n, _, _ in deferred]
+    assert not any("Pass B path length" in n for n in names)
+    assert not any("December cohorts" in n for n in names)
+    # The conditions that do not need paths still run.
+    assert any("exactly one contract" in n for n in names)
+    assert any("survives to expiry" in n for n in names)
+
+    # Without the flag, an empty paths frame is a genuine failure, not a deferral.
+    strict = checkpoint_2b(spec, chain([{"optionid": 1}]), sel, pd.DataFrame(),
+                           spot, curve, cfg)
+    assert any("Pass B path length" in n and not ok for n, ok, _ in strict)
