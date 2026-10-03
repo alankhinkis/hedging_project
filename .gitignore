@@ -38,3 +38,6 @@ venv/
 # OS
 .DS_Store
 Thumbs.db
+
+# Archived results from an earlier sample window (derived data, regenerable)
+archive/

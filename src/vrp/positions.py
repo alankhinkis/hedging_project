@@ -159,7 +159,14 @@ def position_underlying(
     not register as a 75% move. Returns (date, S) with non-trading days dropped -- the engine
     carries the delta forward across them.
     """
-    sl = panel.loc[(panel["date"] >= entry_date) & (panel["date"] <= expiry)]
+    # Slice by binary search rather than a boolean mask. The panel is sorted by date, and a
+    # mask costs O(len(panel)) per position -- which is invisible on an 8-year panel and
+    # expensive on a 30-year one (~7,500 rows x ~98,000 positions). searchsorted makes the
+    # cost proportional to the ~20-day window actually used.
+    dates_arr = panel["date"].to_numpy()
+    lo = int(np.searchsorted(dates_arr, np.datetime64(entry_date), side="left"))
+    hi = int(np.searchsorted(dates_arr, np.datetime64(expiry), side="right"))
+    sl = panel.iloc[lo:hi]
     sl = sl.loc[sl["has_price"]]
     if not len(sl):
         return pd.DataFrame(columns=["date", "S"])

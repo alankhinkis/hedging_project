@@ -145,8 +145,7 @@ def main() -> int:
     cal_out = calendar.copy()
     cal_out["entry_month"] = cal_out["entry_month"].astype(str)
     cal_out.to_parquet(cfg.data_interim / "entry_calendar.parquet", index=False)
-    print(f"
-entry calendar [{cfg['selection']['entry_rule']}]: "
+    print(f"\nentry calendar [{cfg['selection']['entry_rule']}]: "
           f"{len(calendar)} dates, {calendar['entry_date'].min().date()} "
           f"to {calendar['entry_date'].max().date()}")
     cmp = calendar.merge(alt, on="entry_month", suffixes=("", "_fom"))

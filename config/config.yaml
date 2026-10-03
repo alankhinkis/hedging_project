@@ -4,12 +4,20 @@
 
 sample:
   # Analysis window for option positions.
-  start_date: "2017-01-01"
+  #
+  # EXTENDED 2026-10-02 from 2017-2023 to the full OptionMetrics span. The 7-year sample could
+  # not settle whether the near-zero mean was a property of the period or of the premium: a
+  # power calculation on the observed dispersion says detecting a -0.10% mean at 80% power
+  # needs ~259 months (~22 years), and 3 months out of 84 drove the whole result. 28 years
+  # spans the dot-com unwind and 2008 as well as COVID, so the answer stops depending on which
+  # shocks one window happens to contain. The 2017-2023 results are archived for comparison.
+  start_date: "1996-01-01"        # OptionMetrics begins 1996
   end_date: "2023-12-31"
   # December-2023 entries are held into January 2024, so price/option pulls run past end_date.
   hold_buffer_end: "2024-02-29"
-  # 12-month burn-in before start_date for volatility estimation (Stage 3).
-  burnin_start: "2016-01-01"
+  # Burn-in before start_date for volatility estimation (Stage 3). Two years, so the FIRST
+  # sample year gets the full garch_train_years window rather than a short one.
+  burnin_start: "1994-01-01"
 
 universe:
   # Point-in-time S&P 500 membership, ranked by month-end market cap.
