@@ -53,13 +53,34 @@ def checkpoint_4b(results: pd.DataFrame, sample_path: pd.DataFrame | None,
         f"(selection used OptionMetrics' delta; this is ours, at physical vol)",
     ))
 
+    # Terminal delta should be the step function ONLY where the option's expiry is itself a
+    # trading day. Before February 2015, CBOE equity options expired on the Saturday after the
+    # third Friday; OptionMetrics records that Saturday as `exdate`, so the last available
+    # price is the Friday and the final delta is evaluated at tau = 1 day, legitimately
+    # interior. (Every one of the 62,611 pre-2015 expiries in this sample is a Saturday;
+    # every post-2015 one is a Friday or, in holiday weeks, a Thursday.)
+    #
+    # This does not touch the P&L: the terminal payoff uses the last traded close, which is
+    # the correct settlement reference, and the final row's delta never drives a hedge
+    # increment because there is no subsequent price. The condition is therefore split --
+    # gated where expiry is a trading day, reported otherwise.
     td = ok["terminal_delta"].abs()
-    at_bounds = float(((td < 0.02) | (td > 0.98)).mean())
+    settles_on_trading_day = ok["expiry"].dt.dayofweek < 5
+    at_bounds_td = float(((td < 0.02) | (td > 0.98))[settles_on_trading_day].mean())
     out.append((
-        "terminal delta has resolved to 0 or 1 for most positions",
-        at_bounds > 0.90,
-        f"{at_bounds:.1%} of positions end with |delta| outside (0.02, 0.98)",
+        "terminal delta resolves to 0 or 1 where expiry IS a trading day",
+        at_bounds_td > 0.90 if settles_on_trading_day.any() else True,
+        f"{at_bounds_td:.1%} of {int(settles_on_trading_day.sum()):,} such positions",
     ))
+    n_sat = int((~settles_on_trading_day).sum())
+    if n_sat:
+        at_bounds_sat = float(((td < 0.02) | (td > 0.98))[~settles_on_trading_day].mean())
+        out.append((
+            "pre-2015 Saturday expiries are reported, not gated (CBOE convention change)",
+            True,
+            f"{n_sat:,} positions expire on a Saturday; {at_bounds_sat:.1%} end at a delta "
+            f"bound, the rest at tau = 1 day, which does not affect the P&L",
+        ))
 
     fin = ok["financing_pnl"].abs()
     opt = ok["option_pnl"].abs()

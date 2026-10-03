@@ -44,7 +44,7 @@ findings that change later stages.
 ## Headline result
 
 **The mean delta-hedged gain on single-name equity options is not distinguishable from zero**
-(mean pi/S = +0.042%, Newey-West t = **+0.74** on 84 monthly observations). This does **not**
+(mean pi/S = +0.058%, Newey-West t = **+1.07** on **334 monthly observations, 1996-2023**). This does **not**
 reproduce BK's significantly negative index-option result, and that is reported as a finding
 rather than treated as a failure.
 
@@ -52,24 +52,26 @@ What the data does show is a long-gamma signature:
 
 | | value | BK ATM anchor |
 |---|---:|---|
-| mean pi/S | +0.0422% | -0.10% to -0.11% |
-| **median pi/S** | **-0.1339%** (negative in every year) | |
-| fraction losing money | 57.2% | 68% |
+| mean pi/S | +0.0583% | -0.10% to -0.11% |
+| **median pi/S** | **-0.1278%** | |
+| fraction losing money | 56.3% | 68% |
 | mean after trimming 1% tails | **-0.0021%** | |
+| **median pi/C** | **-4.44%** | **-3.88%** |
 
 Frequent small theta bleed, punctuated by rare large gains when an underlying moves violently.
 The positive mean is entirely tail-driven -- trimming 1% of each tail erases it, while the
 median does not move.
 
-**Entering at the ask flips the sign.** Marking entry at the price a buyer actually pays,
-rather than the midpoint, moves the mean to **-0.061%** and the median to **-0.217%**, with
-61.2% of positions losing (t = -1.12). The bid-ask spread is comparable to the premium itself,
+**Entering at the ask flips the sign, significantly.** Marking entry at the price a buyer
+actually pays, rather than the midpoint, moves the mean to **-0.068%** and the median to
+**-0.231%**, with 61.0% of positions losing -- and over 334 months this is **significant
+(t = -2.07)**, where on the 7-year sample it was not (t = -1.12). The bid-ask spread is comparable to the premium itself,
 which is both BK's economic-significance test answered directly and the honest explanation for
 why the premium is not arbitraged away in single names.
 
 Two things worth noting:
 
-- **The naive pooled t-stat is +5.49**, 7.4x the honest figure, and it points the *wrong way*:
+- **The naive pooled t-stat is +10.28**, 9.6x the honest figure, and it points the *wrong way*:
   it would have declared a significant **positive** gain. Leading with the conservative
   statistic was pre-committed (Q4) before any result existed.
 - **The SPX anchor validates the engine.** Run on BK's own asset class, the median π/C comes

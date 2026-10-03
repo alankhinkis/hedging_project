@@ -41,3 +41,7 @@ Thumbs.db
 
 # Archived results from an earlier sample window (derived data, regenerable)
 archive/
+
+# Run logs and scratch from long rebuilds
+*.log
+tmpdoc/
