@@ -215,7 +215,10 @@ def checkpoint_4_5(results: pd.DataFrame, cfg: Config | None = None) -> list[tup
         return [("SPX anchor produced results", False, "no positions priced")]
 
     inf = monthly_portfolio_tstat(ok, "pnl_over_S")
-    mean_pct = float(ok["pnl_over_S"].mean() * 100)
+    # Mean of the monthly averages, i.e. the mean the monthly Newey-West t is a t-stat on.
+    # On SPX this equals the pooled mean because every month holds exactly one call and one
+    # put, but the pairing is made explicit so it cannot silently diverge if that changes.
+    mean_pct = float(inf["mean"] * 100)
     median_pct = float(ok["pnl_over_S"].median() * 100)
     median_c = float(ok["pnl_over_C"].median() * 100)
     frac_neg = float((ok["pnl"] < 0).mean())

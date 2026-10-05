@@ -761,11 +761,17 @@ same 334 entry dates as the cross-section (668 positions), with the same engine 
 
 | | SPX 1996-2023 | single names 1996-2023 | BK (SPX 1988-95) |
 |---|---:|---:|---:|
-| mean pi/S | **-0.0636%** | +0.0583% | -0.10% to -0.11% |
-| monthly Newey-West t | **-1.82** | +1.07 | -2.34 (naive) |
-| two-way clustered t | -2.05 | +1.52 | |
-| median pi/C | -5.48% | -4.44% | -3.88% |
+| mean pi/S, average of monthly averages | **-0.0636%** | +0.0451% | -0.10% to -0.11% |
+| **paired with:** monthly Newey-West t (6 lags) | **-1.82** | +1.07 | -2.34 (naive) |
+| mean pi/S, pooled over positions | -0.0636% | +0.0583% | |
+| **paired with:** two-way clustered t | -2.05 | +1.52 | |
+| median pi/C (position level) | -5.48% | -4.44% | -3.88% |
 | fraction losing | 61.8% | 56.3% | 68% |
+
+On SPX the two means coincide because every month holds exactly one call and one put (668
+positions over 334 months), so equal weighting by month and by position are the same thing. For
+single names they do not: months hold 167 to 362 positions, so the pooled mean leans toward
+crowded months (+0.0583%) while the monthly average counts each month once (+0.0451%).
 
 Sub-periods for SPX: 1996-2002 mean -0.131%, 2003-2023 -0.042%, 2017-2023 +0.035%. The 7-year
 window that gave a positive mean is the anomalous slice, not the representative one.
@@ -802,7 +808,8 @@ for single names (Q2). The CRR robustness column remains the only way to probe t
 
 | | value | BK ATM anchor |
 |---|---:|---|
-| mean π/S | **+0.0422%** | −0.10% to −0.11% |
+| mean π/S, pooled over positions | **+0.0422%** | −0.10% to −0.11% |
+| mean π/S, average of monthly averages | +0.0420% | |
 | median π/S | **−0.1339%** | |
 | mean π/C | +1.56% | −3.88% |
 | median π/C | −5.12% | |
@@ -811,23 +818,53 @@ for single names (Q2). The CRR robustness column remains the only way to probe t
 
 ### Inference (Q4) — and the naive statistic points the wrong way
 
-| method | mean | t | effective N |
-|---|---:|---:|---:|
-| **monthly portfolio (Newey-West)** | +0.0004 | **+0.74** | 84 |
-| two-way clustered (permno, month) | +0.0004 | +0.65 | 27,616 |
-| naive pooled *(overstated)* | +0.0004 | **+5.49** | 27,616 |
+| method | mean used | standard error | t | effective N |
+|---|---:|---:|---:|---:|
+| **monthly portfolio (Newey-West)** | +0.0420% (monthly average) | 0.0569% | **+0.74** | 84 |
+| two-way clustered (permno, month) | +0.0422% (pooled) | | +0.65 | 27,616 |
+| naive pooled *(overstated)* | +0.0422% (pooled) | 0.0077% | **+5.49** | 27,616 |
 
 The honest t-statistic is **+0.74**: the mean delta-hedged gain is not distinguishable from
-zero. The naive pooled figure is **7.4× inflated**, and the Q4 pre-commitment earns its keep in
-a sharper way than anticipated — the naive statistic would not merely have overstated
-significance, it would have declared a **significant *positive*** gain, the opposite of the
-paper's finding and of what the data supports.
+zero. The naive standard error is **7.4× too small** (0.0077% against 0.0569%), which is also the
+ratio of the two t-statistics here because the two means nearly coincide. The Q4 pre-commitment
+earns its keep in a sharper way than anticipated: the naive statistic would not merely have
+overstated significance, it would have declared a **significant *positive*** gain, the opposite
+of the paper's finding and of what the data supports.
+
+### Which mean goes with which t-statistic
+
+Three estimators are reported. Each t-stat is quoted only with the mean it was computed from.
+
+| estimator | mean it is a test of | standard error | where |
+|---|---|---|---|
+| **monthly portfolio** (primary) | equal-weighted average of the monthly average gains | Newey-West HAC, 6 lags, on the 334 monthly values (`sm.OLS(y, 1).fit(cov_type="HAC", cov_kwds={"maxlags": 6})`; statsmodels' default normal reference distribution) | `monthly_portfolio_tstat` |
+| two-way clustered | pooled mean over all positions | clustered by permno and by entry month | `clustered_tstat` |
+| naive pooled | pooled mean over all positions | `std / sqrt(N)`, assumes independent positions | `naive_tstat` |
+
+Full-sample single names: monthly average **+0.0451%** with t **+1.07** (SE 0.0420%); pooled
+**+0.0583%** with clustered t **+1.52** and naive t **+10.28** (naive SE 0.0057%). The naive
+standard error is 0.0420 / 0.0057 = **7.4× too small**. The ratio of the t-statistics is 9.6, but
+that mixes the standard-error gap with the difference between the two means, so it is not quoted
+as the inflation factor.
+
+**Entering at the ask (Q12), full sample, each estimator with its own mean:**
+
+| estimator | mean | standard error | t |
+|---|---:|---:|---:|
+| monthly Newey-West (334 months) | **-0.0822%** | 0.0398% | **-2.07** |
+| two-way clustered (97,532 positions) | -0.0678% | 0.0377% | -1.80 |
+| naive pooled *(overstated)* | -0.0678% | 0.0057% | -11.96 |
+
+An earlier version of this section quoted "-0.068%, t = -2.07", which pairs the pooled mean with
+the monthly t. The significance claim depends on the estimator: -2.07 clears 1.96 and -1.80 does
+not, so the loss is reliable on the conservative monthly statistic and marginal on the clustered
+one. Median pi/S is -0.2306% and 61.0% of positions lose money (both position-level).
 
 ### What the data actually says
 
 The mean and the median disagree, and the disagreement is the result:
 
-* **The mean is entirely tail-driven.** Trimming the top and bottom 1% moves it from +0.0422%
+* **The mean is entirely tail-driven.** Trimming the top and bottom 1% moves the pooled mean from +0.0422%
   to **−0.0021%** — essentially zero — while the median is unchanged at −0.1339%.
 * **The median is negative, in every single year**, and 57.2% of positions lose money.
 * **High-volatility years are more positive, not more negative**: 2018/2020 +0.1811% against
@@ -873,6 +910,13 @@ not distinguishable from zero, so there is no evidence that Black-Scholes system
 under-hedges here in a way that would bias π upward.
 
 ### Robustness (Table 11)
+
+> **Pairing note on the 7-year robustness table.** Its mean column is the pooled position-level
+> mean while its t-stat is the monthly Newey-West t, which are different estimators. For the
+> baseline row the two means nearly coincide (+0.0422% pooled vs +0.0420% monthly), but I did not
+> save the 7-year variants' per-position results, so I cannot confirm the other rows are as
+> close. The full-sample table below pairs them correctly and saves each variant's results.
+
 
 Each row re-runs the engine over the same positions with exactly one thing changed.
 

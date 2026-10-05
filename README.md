@@ -44,7 +44,9 @@ findings that change later stages.
 ## Headline result
 
 **The mean delta-hedged gain on single-name equity options is not distinguishable from zero**
-(mean pi/S = +0.058%, Newey-West t = **+1.07** on **334 monthly observations, 1996-2023**). This does **not**
+(mean of monthly averages = +0.045% of stock price, Newey-West t = **+1.07** on **334 monthly
+observations, 1996-2023**; the pooled position-level mean is +0.058%, with a two-way clustered
+t of +1.52). This does **not**
 reproduce BK's significantly negative index-option result, and that is reported as a finding
 rather than treated as a failure.
 
@@ -52,34 +54,40 @@ What the data does show is a long-gamma signature:
 
 | | value | BK ATM anchor |
 |---|---:|---|
-| mean pi/S | +0.0583% | -0.10% to -0.11% |
-| **median pi/S** | **-0.1278%** | |
+| mean pi/S, average of monthly averages (Newey-West t = +1.07) | +0.0451% | -0.10% to -0.11% |
+| mean pi/S, pooled over positions (two-way clustered t = +1.52) | +0.0583% | |
+| **median pi/S** (position level) | **-0.1278%** | |
 | fraction losing money | 56.3% | 68% |
-| mean after trimming 1% tails | **-0.0021%** | |
+| pooled mean after trimming 1% tails | **-0.0021%** | |
 | **median pi/C** | **-4.44%** | **-3.88%** |
 
 Frequent small theta bleed, punctuated by rare large gains when an underlying moves violently.
 The positive mean is entirely tail-driven -- trimming 1% of each tail erases it, while the
 median does not move.
 
-**Entering at the ask flips the sign, significantly.** Marking entry at the price a buyer
-actually pays, rather than the midpoint, moves the mean to **-0.068%** and the median to
-**-0.231%**, with 61.0% of positions losing -- and over 334 months this is **significant
-(t = -2.07)**, where on the 7-year sample it was not (t = -1.12). The bid-ask spread is comparable to the premium itself,
-which is both BK's economic-significance test answered directly and the honest explanation for
-why the premium is not arbitraged away in single names.
+**Entering at the ask flips the sign.** Marking entry at the price a buyer actually pays,
+rather than the midpoint, gives a mean of **-0.082%** (average of monthly averages, Newey-West
+t = **-2.07** over 334 months) and a pooled position-level mean of **-0.068%** (two-way
+clustered t = **-1.80**); the median is **-0.231%** and 61.0% of positions lose. So the loss is
+significant on the conservative monthly statistic and marginal on the clustered one -- on the
+7-year sample neither was close (t = -1.12). The bid-ask spread is comparable to the premium
+itself, which is both BK's economic-significance test answered directly and the honest
+explanation for why the premium is not arbitraged away in single names.
 
 Two things worth noting:
 
-- **The naive pooled t-stat is +10.28**, 9.6x the honest figure, and it points the *wrong way*:
+- **The naive pooled standard error is about 7.4x too small.** The naive t-stat is **+10.28**
+  (pooled mean +0.058%, treating 97,532 same-month positions as independent) against
+  **+1.07** for Newey-West on monthly averages (mean +0.045%). It also points the *wrong way*:
   it would have declared a significant **positive** gain. Leading with the conservative
   statistic was pre-committed (Q4) before any result existed.
 - **The SPX anchor validates the engine, and shows the index/single-name split in the same
   data.** Run on BK's own asset class over the same 334 months, SPX gives a mean pi/S of
-  **-0.064%** (monthly t = **-1.82**; two-way clustered t = -2.05), median pi/C **-5.48%**
+  **-0.064%** (monthly Newey-West t = **-1.82**; two-way clustered t = -2.05; the monthly and
+  pooled means coincide because every month holds exactly one call and one put), median pi/C **-5.48%**
   against BK's -3.88%, and 61.8% of positions losing against their 68%. The sign matches the
   paper and the magnitude is within its range. Single names, same code and same months:
-  **+0.058%, t = +1.07**. So the index premium shows up and the single-name one does not --
+  **+0.045%** (monthly average), **t = +1.07**. So the index premium shows up and the single-name one does not --
   the Driessen-Maenhout-Vilkov / Carr-Wu result, reproduced internally. The index result is
   marginal on the conservative statistic, not overwhelming.
 

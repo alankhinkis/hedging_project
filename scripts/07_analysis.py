@@ -117,12 +117,28 @@ def checkpoint_5(results, summary, inference, side, year, outliers, cfg):
 
     # ---------------- findings: reported, never gating ----------------
     naive_t = float(inference.loc[inference["method"].str.startswith("naive"), "t"].iloc[0])
-    ratio = abs(naive_t / primary["t"]) if primary["t"] else np.nan
+    naive_row = inference.loc[inference["method"].str.startswith("naive")].iloc[0]
+    clus_row = inference.loc[inference["method"].str.contains("clustered")].iloc[0]
+    se_ratio = float(primary["se"] / naive_row["se"]) if naive_row["se"] else np.nan
+
+    # Each t-stat is reported with the mean from THE SAME estimator. The monthly Newey-West
+    # t is a t-stat on the equal-weighted average of monthly averages (every month counts
+    # once), while the pooled position-level mean weights every position once and so leans
+    # toward months with many positions (167 to 362 per month). They differ (+0.045% vs
+    # +0.058% on the full sample), and quoting the pooled mean next to the monthly t, as an
+    # earlier version of this line did, pairs two different statistics.
     out.append((
-        "[finding] mean pi/S and its honest t-stat",
+        "[finding] mean pi/S and its honest t-stat (same estimator)",
         True,
-        f"mean {mean_pct:+.4f}% of S, t = {primary['t']:+.2f} on {int(primary['n_obs'])} "
-        f"months -- NOT distinguishable from zero  [BK ATM anchor: -0.10% to -0.11%]",
+        f"mean of monthly averages {primary['mean'] * 100:+.4f}% of S, Newey-West t = "
+        f"{primary['t']:+.2f} on {int(primary['n_obs'])} months -- NOT distinguishable from "
+        f"zero  [BK ATM anchor: -0.10% to -0.11%]",
+    ))
+    out.append((
+        "[finding] pooled position-level mean and its clustered t-stat (same estimator)",
+        True,
+        f"pooled mean {clus_row['mean'] * 100:+.4f}% over {int(clus_row['n_obs']):,} "
+        f"positions, two-way clustered t = {clus_row['t']:+.2f}",
     ))
     out.append((
         "[finding] median pi/S and the fraction of losers",
@@ -131,10 +147,14 @@ def checkpoint_5(results, summary, inference, side, year, outliers, cfg):
         f"positions lose money  [BK ATM: 68%]",
     ))
     out.append((
-        "[finding] Q4: the naive pooled t-stat is inflated and points the WRONG way",
+        "[finding] Q4: the naive pooled standard error is far too small",
         True,
-        f"naive t = {naive_t:+.2f} vs monthly t = {primary['t']:+.2f} ({ratio:.1f}x); "
-        f"the naive figure would have declared a significant POSITIVE gain",
+        f"naive SE {naive_row['se'] * 100:.4f}% vs Newey-West SE {primary['se'] * 100:.4f}% "
+        f"({se_ratio:.1f}x too small); naive t = {naive_t:+.2f} (pooled mean "
+        f"{naive_row['mean'] * 100:+.4f}%) vs Newey-West t = {primary['t']:+.2f} (monthly "
+        f"mean {primary['mean'] * 100:+.4f}%). The naive t treats {int(naive_row['n_obs']):,} "
+        f"same-month positions as independent and would have declared a significant "
+        f"POSITIVE gain",
     ))
 
     trimmed_mean = float(outliers.loc[outliers["sample"] != "full", "mean"].iloc[0])
