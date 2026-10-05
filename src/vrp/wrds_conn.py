@@ -18,6 +18,7 @@ import atexit
 import hashlib
 import json
 import logging
+import os
 import re
 import time
 from pathlib import Path
@@ -63,7 +64,10 @@ def get_connection(cfg: Config | None = None, *, force_new: bool = False):
     log.info("Opening WRDS connection as %s ...", username)
     t0 = time.time()
     last_exc: Exception | None = None
-    for attempt in range(1, 4):
+    # Each attempt can fire a Duo push on accounts with 2FA, and repeated unanswered or denied
+    # pushes can lock the account. VRP_WRDS_ATTEMPTS=1 gives a single try with no retries.
+    max_attempts = max(1, int(os.environ.get("VRP_WRDS_ATTEMPTS", "3")))
+    for attempt in range(1, max_attempts + 1):
         try:
             _CONN = wrds.Connection(wrds_username=username)
             break
@@ -73,7 +77,7 @@ def get_connection(cfg: Config | None = None, *, force_new: bool = False):
             # reset, not bad credentials; back off and retry before giving up. Without this
             # the wrds client falls through to an interactive username prompt, which in a
             # non-interactive run surfaces as a confusing EOFError.
-            if attempt < 3:
+            if attempt < max_attempts:
                 log.warning("WRDS connection attempt %d failed (%s); retrying in %ds",
                             attempt, str(exc).splitlines()[0][:90], 5 * attempt)
                 time.sleep(5 * attempt)

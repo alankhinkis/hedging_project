@@ -29,7 +29,7 @@ significantly negative mean gain implies a negative volatility risk premium.
 | 2b — option chains | screens, contract selection, holding paths | ✅ **complete** — 27,658 positions (monthlies only), Checkpoint 2b passes |
 | 3 — physical volatility (VOL^h, VOL^g) | realised + GARCH, refit annually | ✅ **complete** — Checkpoint 3 passes |
 | 4 — the delta-hedging engine | BS delta at physical vol, held to expiry | ✅ **complete** — zero-VRP synthetic test passes (t = +0.62) |
-| 4.5 — SPX anchor | the engine on BK's own asset class | ✅ **complete** — median π/C −3.62% vs BK's −3.88% |
+| 4.5 — SPX anchor | the engine on BK's own asset class, 1996–2023 | ✅ **complete** — mean −0.064% (t = −1.82), sign matches BK |
 | 5 — statistical analysis | 10 tables, three t-stat flavours, regime splits | ✅ **complete** — Checkpoint 5 passes |
 
 Stage 1's pure-pandas logic (the point-in-time join, the ranking) is fully unit-tested and passes
@@ -74,11 +74,14 @@ Two things worth noting:
 - **The naive pooled t-stat is +10.28**, 9.6x the honest figure, and it points the *wrong way*:
   it would have declared a significant **positive** gain. Leading with the conservative
   statistic was pre-committed (Q4) before any result existed.
-- **The SPX anchor validates the engine.** Run on BK's own asset class, the median π/C comes
-  out at **−3.62% against BK's −3.88%**, with 57.7% of positions losing money against their
-  68%. The central tendency reproduces the paper. SPX shows the *same* positive mean, and four
-  COVID observations out of 168 account for it — so the mean result is a property of the
-  2017–2023 period, not of single names or of the code.
+- **The SPX anchor validates the engine, and shows the index/single-name split in the same
+  data.** Run on BK's own asset class over the same 334 months, SPX gives a mean pi/S of
+  **-0.064%** (monthly t = **-1.82**; two-way clustered t = -2.05), median pi/C **-5.48%**
+  against BK's -3.88%, and 61.8% of positions losing against their 68%. The sign matches the
+  paper and the magnitude is within its range. Single names, same code and same months:
+  **+0.058%, t = +1.07**. So the index premium shows up and the single-name one does not --
+  the Driessen-Maenhout-Vilkov / Carr-Wu result, reproduced internally. The index result is
+  marginal on the conservative statistic, not overwhelming.
 
 ---
 

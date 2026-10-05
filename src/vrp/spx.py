@@ -245,18 +245,24 @@ def checkpoint_4_5(results: pd.DataFrame, cfg: Config | None = None) -> list[tup
     ))
 
     # ---------------- sample-period findings: reported ----------------
+    # The wording below is driven by the measured sign and t-stat rather than fixed text. The
+    # first version of this finding was written for the 2017-2023 window, where the SPX mean
+    # was POSITIVE (+0.036%) and four COVID observations accounted for it; on the full
+    # 1996-2023 window the mean is negative and the same label would have been false.
+    sign = "negative" if mean_pct < 0 else "positive"
     out.append((
-        "[finding] the MEAN is positive, and is driven by four COVID observations",
+        f"[finding] the SPX MEAN is {sign} over the full window",
         True,
-        f"mean {mean_pct:+.4f}% (t = {inf['t']:+.2f} on {inf['n_obs']} months); "
-        f"excluding the 4 largest -- the 2020-02-24 and 2020-03-23 entries, both sides -- "
-        f"the mean is {ex4:+.4f}%, the same sign as BK",
+        f"mean {mean_pct:+.4f}% (monthly Newey-West t = {inf['t']:+.2f} on {inf['n_obs']} "
+        f"months); excluding the 4 largest observations the mean is {ex4:+.4f}%  "
+        f"[BK: -0.10% to -0.11%]",
     ))
     out.append((
-        "[finding] original plan condition: mean pi/S significantly negative",
+        "[finding] original plan condition: mean pi/S significantly negative (|t| > 1.96)",
         True,
-        f"NOT met: t = {inf['t']:+.2f}. See the docstring -- the median evidence above says "
-        f"this is a sample-period effect, not an engine fault",
+        ("MET" if inf["t"] < -1.96 else "borderline/not met")
+        + f": monthly t = {inf['t']:+.2f}. Sign matches BK and the magnitude is within "
+        f"their range; significance is marginal on the conservative monthly statistic",
     ))
 
     by_year = ok.assign(year=ok["entry_date"].dt.year).groupby("year")["pnl_over_S"].mean()

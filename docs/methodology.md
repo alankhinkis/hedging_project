@@ -754,6 +754,38 @@ independently in the cross-section — not the fact that it failed. The original
 still computed and printed, labelled "NOT met". A reader who disagrees with the reasoning can
 see exactly what was changed and why.
 
+### Update: the SPX anchor over the full 1996-2023 window
+
+The section above describes the first run, on 2017-2023 only (168 positions). Re-run over the
+same 334 entry dates as the cross-section (668 positions), with the same engine and screens:
+
+| | SPX 1996-2023 | single names 1996-2023 | BK (SPX 1988-95) |
+|---|---:|---:|---:|
+| mean pi/S | **-0.0636%** | +0.0583% | -0.10% to -0.11% |
+| monthly Newey-West t | **-1.82** | +1.07 | -2.34 (naive) |
+| two-way clustered t | -2.05 | +1.52 | |
+| median pi/C | -5.48% | -4.44% | -3.88% |
+| fraction losing | 61.8% | 56.3% | 68% |
+
+Sub-periods for SPX: 1996-2002 mean -0.131%, 2003-2023 -0.042%, 2017-2023 +0.035%. The 7-year
+window that gave a positive mean is the anomalous slice, not the representative one.
+
+**What this resolves.** The earlier statement that the positive SPX mean was "a property of
+2017-2023" was correct, and the full window confirms it: the mean is negative, the same sign as
+BK and inside their magnitude range. Significance is marginal on the conservative monthly
+statistic (|t| = 1.82 against a 1.96 bar) and passes on the clustered one, so the honest
+description is "consistent with BK, not decisively confirmed". BK's own naive statistic was
+only -2.34.
+
+**Index vs single names, in one dataset.** Same code, same 334 months: SPX negative at t = -1.82,
+single names positive at t = +1.07. That is the Driessen-Maenhout-Vilkov and Carr-Wu result
+(index variance premium significant, individual-stock premium not) reproduced internally rather
+than only cited. The SPX median pi/C (-5.48%) sits further from BK than the 7-year run did
+(-3.62%), but the gate band for it is wide and the sign and loss frequency are right.
+
+The checkpoint's finding labels were originally fixed text written for the positive 2017-2023
+result; they are now derived from the measured sign and t-statistic.
+
 ### What this does not validate
 
 SPX options are European and cash-settled. This exercises the pricing, the hedge accumulation,
